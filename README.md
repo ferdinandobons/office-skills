@@ -60,7 +60,7 @@ General-purpose document skills generate *freely* and only loosely imitate a ref
 - 🎯 **Brand-faithful by construction** - generation opens from the real template shell and applies only its named styles, theme colors, fonts and layouts. The content model is brand-agnostic; the **Brand Profile** is the single source of brand truth.
 - 🧠 **Extract once, reuse forever** - a portable `brand-kit/<name>/` is the template's memory; every later document reads it. No re-explaining the brand.
 - 🏛️ **Structure-aware** - captures the template's *ordered skeleton* (e.g. **cover → table of contents → body**) and tags each component as a **fixed structure to keep in order** or a **style to use on demand**. ([details](#structure-aware-not-just-style-aware))
-- ✅ **Enforced, not just promised** - `verify` opens the shell and **fails** if a role resolves to a style/layout/named-range that doesn't exist. Deterministic checks also cover allowed styles, palette adherence, residual template text, broken tables and language rules.
+- ✅ **Enforced, not just promised** - `verify` opens the shell and **fails** if a role resolves to a style/layout/named-range that doesn't exist. Deterministic checks also cover allowed styles, palette adherence, residual template text, broken tables, **formula preservation** (Excel), native-component survival and language rules.
 - 🧩 **One shared engine** - a single profile schema, resolver, OOXML layer and QA gate underpin all three formats. The Word vertical is the reference implementation; PowerPoint and Excel build on the same foundation.
 - 🗂️ **Full artifact catalog** - records OOXML parts, styles, media, layouts, formulas and named ranges, so an agent can reason about anything the template exposes - even artifacts it can't yet regenerate.
 - 🔓 **Self-contained & MIT** - pure `python-docx` / `python-pptx` / `openpyxl` + OOXML. No cloud, no external services, no vendor lock-in.
@@ -85,7 +85,7 @@ General-purpose document skills generate *freely* and only loosely imitate a ref
 
 1. **Extract** unpacks the template's OOXML and records its brand: theme, named styles mapped to semantic **roles**, the **document structure** (the ordered skeleton plus which parts are fixed vs free), layouts, cover anchors, logos, and a complete artifact catalog. The original file is kept **byte-for-byte** as the *shell*.
 2. **Generate** turns your content into an **IntermediateDocument** of brand-agnostic typed blocks (heading, paragraph, callout, list, table, …). A **pure resolver** maps each block to the concrete brand artifact from the profile, fills the shell **in the template's structural order**, and saves.
-3. **Verify / QA** runs deterministic checks - every role resolves to a real artifact, only allowed styles are used, the palette holds, no residual template text remains, tables are intact - and, when LibreOffice is available, a visual pass.
+3. **Verify / QA** runs deterministic checks - every role resolves to a real artifact, only allowed styles are used, the palette holds, no residual template text remains, tables are intact, **Excel formulas survive every region fill** - and, when LibreOffice is available, a visual pass.
 
 ---
 
@@ -105,7 +105,7 @@ So a generated report opens with the company cover, keeps a live table of conten
 | Skill | Format | Generates |
 |---|---|---|
 | **`brand-docx`** | Word `.docx` | reports, letters, memos: cover, headings, paragraphs, callouts, quotes, captions, lists, tables - in the template's structural order |
-| **`brand-pptx`** | PowerPoint `.pptx` | decks: title / section / content slides from the template's real masters & layouts, with long-text splitting |
+| **`brand-pptx`** | PowerPoint `.pptx` | decks: title / section / content slides from the template's real masters & layouts, with real bullet levels and long-text splitting |
 | **`brand-xlsx`** | Excel `.xlsx` | workbooks: fills named cells & regions while **preserving formulas** and workbook structure |
 
 All three expose the same three verbs: **`extract` → `verify` → `generate`** - each skill is self-contained and **same-format** (a Word template makes Word documents, never a deck or a sheet).
@@ -242,7 +242,7 @@ PowerPoint uses the same `IntermediateDocument`; Excel uses a `GridDocument` (na
 | `brand-docx` - extract → verify → generate | ✅ working |
 | Document **structure** extraction & order-aware generation | ✅ working |
 | Brand-guarantee enforcement (`verify` fails on missing artifacts) | ✅ working |
-| Deterministic QA (L0: styles, palette, residual text, tables, language) | ✅ working |
+| Deterministic QA (L0: styles, palette, residual text, tables, formula preservation, language) | ✅ working |
 | `brand-pptx` - roles from real layouts, basic generation | 🚧 early |
 | `brand-xlsx` - named-region fills, formula-preserving | 🚧 early |
 | Visual QA (LibreOffice render + auto-repair loop) | 🔭 planned |
