@@ -5,8 +5,9 @@ Two invariants, both scoped to *git-tracked* files (so gitignored scratch such a
 ``brand-kit/`` and ``generated/`` is ignored):
 
 1. No Office binary (``.docx``/``.pptx``/``.xlsx``/legacy) is tracked anywhere
-   except ``tests/fixtures/`` - company templates and generated samples must never
-   be committed, regardless of filename.
+   except ``tests/fixtures/`` (test data) or ``examples/`` (curated, 100% synthetic
+   DocuSkills demo templates, each with a reproducible builder) - real company
+   templates and generated samples must never be committed, regardless of filename.
 2. No tracked source imports Bedrock/boto3 or a vendored proprietary Office helper
    package (``office.*``) - the engine is self-contained.
 """
@@ -26,6 +27,7 @@ FORBIDDEN_RUNTIME_PATTERNS = (
 OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"}
 TEXT_SUFFIXES = {".py", ".md", ".json", ".txt", ".svg", ".yml", ".yaml", ""}
 FIXTURES = ("tests", "fixtures")
+EXAMPLES = ("examples",)  # curated synthetic DocuSkills demo templates (built by examples/builders/*)
 
 
 def _tracked_files(root: Path) -> list[Path]:
@@ -43,8 +45,10 @@ class NoProprietaryTest(unittest.TestCase):
                 continue
             rel = path.relative_to(root)
             suffix = path.suffix.lower()
-            if suffix in OFFICE_SUFFIXES and tuple(rel.parts[:2]) != FIXTURES:
-                offenders.append(f"{rel}: tracked Office asset outside tests/fixtures")
+            in_fixtures = tuple(rel.parts[:2]) == FIXTURES
+            in_examples = rel.parts[:1] == EXAMPLES
+            if suffix in OFFICE_SUFFIXES and not (in_fixtures or in_examples):
+                offenders.append(f"{rel}: tracked Office asset outside tests/fixtures or examples/")
                 continue
             if path == self_path or suffix not in TEXT_SUFFIXES:
                 continue
