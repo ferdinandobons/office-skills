@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.svg" alt="OfficeSkills - extract a company's Word, PowerPoint or Excel template into a reusable Brand Profile, then generate unlimited on-brand documents of that same format" width="100%" />
+<img src="assets/hero.png" alt="OfficeSkills - extract a company's Word, PowerPoint or Excel template into a reusable Brand Profile, then generate unlimited on-brand documents of that same format" width="100%" />
 
 <br/>
 
