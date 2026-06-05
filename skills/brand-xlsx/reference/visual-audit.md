@@ -24,13 +24,17 @@ of the audit.
 |---|---|---|
 | `fast` | L0 only | L0 only (identical) |
 | `auto` | L0 + L1 | L0 + one INFO `visual.unavailable` |
-| `deep` | L0 + L1 + **manifest** (INFO `visual.manifest` with the path) → triggers your L2 step | L0 + one INFO `visual.unavailable` |
+| `deep` | L0 + L1 + **manifest** (INFO `visual.manifest` with the path) -> triggers your L2 step | L0 + INFO `visual.unavailable` + a **degraded manifest** with the checklist; on macOS a first-page Quick Look fallback may be included |
 
 Notes:
 - At **verify** time there is no output to render, so every mode behaves as L0.
-- Renderer absence degrades cleanly: a single INFO finding, no ERROR, **exit code
-  unchanged**. No `.visual` dir is created.
-- The renderer is env-detected via `doctor.probe()["visual_qa"]`.
+- Renderer absence degrades cleanly: INFO/WARNING findings only, no ERROR, **exit
+  code unchanged**. `auto` may create no `.visual` dir; `deep` writes a degraded
+  `.visual/visual_manifest.json` so the orchestrator can still inspect what was
+  skipped and which checklist items remain unproven.
+- The renderer is env-detected via `doctor.probe()["visual_qa"]`; run
+  `python scripts/brandkit/cli.py doctor` before starting the workflow and report
+  missing/unusable dependencies before claiming a full visual audit.
 
 ## L1 proxies
 

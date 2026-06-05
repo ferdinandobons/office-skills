@@ -10,6 +10,21 @@ from pathlib import Path
 
 REQUIRED = ("docx", "pptx", "openpyxl", "lxml", "PIL")
 OPTIONAL_BINARIES = {"soffice": "visual DOCX/PPTX/XLSX render", "pdftoppm": "PDF to PNG visual proof"}
+PYTHON_INSTALL_HINT = "python -m pip install -r requirements.txt"
+OPTIONAL_INSTALL_HINTS = {
+    "soffice": (
+        "macOS: brew install --cask libreoffice-still; "
+        "Debian/Ubuntu: sudo apt-get install -y libreoffice; "
+        "Fedora: sudo dnf install -y libreoffice; "
+        "Windows: winget install TheDocumentFoundation.LibreOffice"
+    ),
+    "pdftoppm": (
+        "macOS: brew install poppler; "
+        "Debian/Ubuntu: sudo apt-get install -y poppler-utils; "
+        "Fedora: sudo dnf install -y poppler-utils; "
+        "Windows: install Poppler and add its bin directory to PATH"
+    ),
+}
 OPTIONAL_BINARY_PROBES = {
     "soffice": ("--headless", "--version"),
     "pdftoppm": ("-v",),
@@ -48,6 +63,9 @@ def _probe_binary(name: str) -> tuple[bool, str | None, str | None]:
     path = shutil.which(name)
     if path is None:
         return False, None, "not found on PATH"
+    preflight_error = _preflight_binary_error(name, path)
+    if preflight_error:
+        return False, path, preflight_error
     args = [path, *OPTIONAL_BINARY_PROBES.get(name, ("--version",))]
     try:
         proc = subprocess.run(
@@ -64,6 +82,50 @@ def _probe_binary(name: str) -> tuple[bool, str | None, str | None]:
         detail = stderr or stdout or f"exit code {proc.returncode}"
         return False, path, detail
     return True, path, None
+
+
+def _preflight_binary_error(name: str, path: str) -> str | None:
+    if name == "soffice":
+        return _soffice_app_signature_error(path)
+    return None
+
+
+def _soffice_app_signature_error(path: str) -> str | None:
+    """Return a macOS LibreOffice signature error without launching the app.
+
+    In the Codex desktop environment a quarantined or invalidly signed
+    ``LibreOffice.app`` can abort inside AppKit before headless conversion even
+    starts. Checking the bundle signature is safer than probing by conversion,
+    because it avoids spawning the crashing process.
+    """
+    app = _libreoffice_app_for_soffice(path)
+    if app is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(app)],
+            capture_output=True,
+            timeout=BINARY_PROBE_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"could not verify LibreOffice.app signature: {exc}"
+    if proc.returncode == 0:
+        return None
+    detail = _short_output(proc.stderr) or _short_output(proc.stdout) or f"exit code {proc.returncode}"
+    return f"LibreOffice.app signature invalid: {detail}"
+
+
+def _libreoffice_app_for_soffice(path: str) -> Path | None:
+    candidates = [
+        Path("/Applications/LibreOffice.app"),
+        Path(path).resolve().parents[2] if len(Path(path).resolve().parents) > 2 else None,
+    ]
+    for candidate in candidates:
+        if candidate and candidate.name == "LibreOffice.app" and candidate.is_dir():
+            return candidate
+    default = Path("/Applications/LibreOffice.app")
+    return default if default.is_dir() else None
 
 
 def _short_output(data) -> str:
@@ -93,6 +155,7 @@ def _probe_visual_pipeline(paths: dict[str, str | None]) -> tuple[bool, str | No
         docx_path = tmp / "probe.docx"
         pdf_dir = tmp / "pdf"
         png_dir = tmp / "png"
+        lo_profile = tmp / "lo-profile"
         pdf_dir.mkdir()
         png_dir.mkdir()
         doc = Document()
@@ -102,15 +165,7 @@ def _probe_visual_pipeline(paths: dict[str, str | None]) -> tuple[bool, str | No
         soffice_path = paths.get("soffice") or "soffice"
         try:
             soffice = subprocess.run(
-                [
-                    soffice_path,
-                    "--headless",
-                    "--convert-to",
-                    "pdf",
-                    "--outdir",
-                    str(pdf_dir),
-                    str(docx_path),
-                ],
+                _soffice_convert_cmd(soffice_path, docx_path, pdf_dir, lo_profile),
                 capture_output=True,
                 timeout=VISUAL_PIPELINE_TIMEOUT_S,
                 check=False,
@@ -156,6 +211,30 @@ def _probe_visual_pipeline(paths: dict[str, str | None]) -> tuple[bool, str | No
     return True, None
 
 
+def _soffice_convert_cmd(
+    soffice_path: str,
+    document: Path,
+    pdf_dir: Path,
+    lo_profile: Path,
+) -> list[str]:
+    """Build a headless conversion command isolated from the user's LO profile."""
+    return [
+        soffice_path,
+        f"-env:UserInstallation={lo_profile.as_uri()}",
+        "--headless",
+        "--nologo",
+        "--nodefault",
+        "--nolockcheck",
+        "--norestore",
+        "--nofirststartwizard",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(pdf_dir),
+        str(document),
+    ]
+
+
 def print_report() -> None:
     status = probe()
     for name, ok in status["python_deps"].items():
@@ -179,3 +258,26 @@ def print_report() -> None:
         if status.get("binary_errors", {}).get("visual_qa"):
             suffix = f" ({status['binary_errors']['visual_qa']})"
         print(f"visual QA disabled; L0 deterministic QA remains available{suffix}")
+    for hint in install_hints(status):
+        print(hint)
+
+
+def install_hints(status: dict) -> list[str]:
+    """Return actionable install/repair hints for unavailable dependencies."""
+    hints: list[str] = []
+    missing_python = [name for name, ok in status.get("python_deps", {}).items() if not ok]
+    if missing_python:
+        hints.append(
+            "install:python: "
+            f"{PYTHON_INSTALL_HINT}  # missing: {', '.join(sorted(missing_python))}"
+        )
+    for name, ok in status.get("binaries", {}).items():
+        if ok:
+            continue
+        path = (status.get("binary_paths") or {}).get(name)
+        action = "repair" if path else "install"
+        detail = f" ({path})" if path else ""
+        hint = OPTIONAL_INSTALL_HINTS.get(name)
+        if hint:
+            hints.append(f"{action}:{name}{detail}: {hint}")
+    return hints

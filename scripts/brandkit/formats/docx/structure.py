@@ -899,6 +899,41 @@ def clear_body_region(doc, structure: Optional[dict] = None, *, preserve_cover: 
         body.remove(children[c["index"]])
 
 
+def prune_leading_empty_body_artifacts(doc) -> int:
+    """Remove empty body-region artifacts before generated body content is written.
+
+    ``clear_body_region`` intentionally preserves section-break paragraphs because
+    they may carry page geometry/header-footer data. In real front matter, caption
+    indexes can later be reconciled away and leave behind blank TOC separators plus
+    demo-body section breaks immediately before the new content insertion point.
+    If kept there, Word/LibreOffice renders blank pages before the generated body.
+
+    This cleanup runs after index reconciliation and before body writing, so any
+    leading empty body paragraph is still template/demo scaffolding, not authored
+    content. Non-empty body content stops the prune.
+    """
+    body = doc.element.body
+    children = list(body)
+    to_remove = []
+    for c in classify_body_children(doc):
+        if c["is_sectpr"]:
+            continue
+        if c["region"] != "body":
+            continue
+        el = children[c["index"]]
+        if _local_name(el.tag) == "p" and _p_text(el).strip() == "":
+            to_remove.append(el)
+            continue
+        break
+
+    removed = 0
+    for el in to_remove:
+        if el.getparent() is body:
+            body.remove(el)
+            removed += 1
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # TOC refresh
 # ---------------------------------------------------------------------------

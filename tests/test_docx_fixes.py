@@ -711,6 +711,10 @@ class ComprehensionReconcileTest(unittest.TestCase):
             self.assertIn("Real Subtitle", text)
             self.assertNotIn("Insert title here", text)
             self.assertNotIn("Subtitle prompt", text)
+            # Cover fields bound to Word core properties must render the new
+            # values when LibreOffice/Word refreshes document fields.
+            self.assertEqual(gen.core_properties.title, "Real Title")
+            self.assertEqual(gen.core_properties.subject, "Real Subtitle")
             # No duplicate title appended (there WAS a title-bearing slot).
             self.assertEqual(text.count("Real Title"), 1)
             self.assertFalse(any(f.check == "cover_degraded" for f in findings))
@@ -798,6 +802,29 @@ class OrphanIndexHeadingTest(unittest.TestCase):
         doc.save(shell)
         return shell
 
+    def _build_shell_with_empty_body_artifacts(self, td):
+        """Like the real front matter, but with empty TOC/body break artifacts.
+
+        The blank paragraphs between the outline TOC and caption index are
+        initially folded into the TOC span and preserved. Once the caption index is
+        reconciled away they become leading body blanks; the empty section-break
+        paragraphs are demo-body artifacts that used to force blank rendered pages
+        before generated content.
+        """
+        shell = Path(td) / "shell-empty-artifacts.docx"
+        doc = Document()
+        doc.add_paragraph("Insert title here")
+        _add_toc_field(doc, 'TOC \\o "1-3" \\h')
+        doc.add_paragraph("")
+        doc.add_paragraph("")
+        doc.add_paragraph("Indice delle Tabelle")
+        _add_multi_paragraph_index(doc, 'TOC \\h \\c "Tabella"')
+        _append_intermediate_sectpr(doc)
+        _append_intermediate_sectpr(doc)
+        doc.add_paragraph("Template Body Heading", style="Heading 1")
+        doc.save(shell)
+        return shell
+
     def _profile_for(self, shell):
         from brandkit.formats.docx import extract as docx_extract
         import tempfile, os, json
@@ -881,6 +908,49 @@ class OrphanIndexHeadingTest(unittest.TestCase):
             self.assertEqual(
                 hashlib.sha256(out1.read_bytes()).hexdigest(),
                 hashlib.sha256(out2.read_bytes()).hexdigest(),
+            )
+
+    def test_full_generate_prunes_leading_empty_body_artifacts_after_index_clear(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._build_shell_with_empty_body_artifacts(td)
+            prof = self._profile_for(shell)
+            s = prof["surface"]["docx"]
+            tabella = next(f["id"] for f in s["fields"] if f["seq_id"] == "Tabella")
+            comp = {
+                "conventions": {
+                    "indexes": [{"index_ref": tabella, "seq_id": "Tabella", "reconcile": "clear"}],
+                    "sections": [],
+                },
+                "demo_classification": {
+                    "regions": [{"region_ref": f"region.{tabella}", "verdict": "demo"}]
+                },
+            }
+            _present_comp(prof, comp)
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Heading(level=1, runs=[{"t": "New Real Section"}])],
+                cover=ir.Cover(title=[{"t": "Filled Title"}]),
+            )
+            out = Path(td) / "out.docx"
+            docx_generate.generate(prof, shell, idoc, out)
+
+            gen = Document(out)
+            children = list(gen.element.body)
+            leading_body = []
+            for c in structure.classify_body_children(gen):
+                if c["region"] != "body" or c["is_sectpr"]:
+                    continue
+                el = children[c["index"]]
+                text = "".join(t.text or "" for t in el.iter(w("t"))).strip()
+                leading_body.append((c, text))
+                if text:
+                    break
+
+            self.assertTrue(leading_body, "generated body disappeared")
+            self.assertEqual(leading_body[0][1], "New Real Section")
+            self.assertFalse(
+                any(c.get("holds_sectpr") for c, _ in leading_body[:-1]),
+                "empty body section breaks survived before generated content",
             )
 
     def test_demo_marker_literals_are_gone(self):

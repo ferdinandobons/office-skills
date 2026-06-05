@@ -1,0 +1,147 @@
+# Visual Audit Improvements
+
+## Current baseline
+
+The current visual audit stack is a good V1 foundation:
+
+- `LibreOffice` / `soffice` renders DOCX, PPTX, and XLSX to PDF using a real
+  office layout engine.
+- `Poppler` / `pdftoppm` rasterizes the generated PDF into per-page PNG files.
+- `Pillow` runs deterministic pixel checks such as blank-page and edge-bleed
+  detection.
+- `doctor` probes Python packages, external binaries, and the real
+  DOCX-to-PDF-to-PNG pipeline before a visual audit is trusted.
+
+This is the right default architecture because pure OOXML inspection cannot prove
+rendered layout correctness. The engine needs a real renderer, then image-level
+checks, then an orchestrator-level qualitative review.
+
+## Dependency preflight contract
+
+Every brand skill (`brand-docx`, `brand-pptx`, `brand-xlsx`) should run this
+before extract, verify, or generate:
+
+```bash
+python scripts/brandkit/cli.py doctor
+```
+
+Expected behavior:
+
+- If required Python packages are missing, stop and install/repair them before
+  running the core engine.
+- If only visual renderers are missing or unusable, extraction and deterministic
+  L0 QA can still run, but the skill must not claim a full visual audit.
+- If `--qa deep` is requested and renderers are unavailable, the engine should
+  write a degraded manifest and clearly report which visual proof is incomplete.
+- `doctor` should always print actionable `install:` or `repair:` hints for
+  missing/unusable dependencies.
+
+## Recommended improvements
+
+### 1. Add a second PDF rasterizer
+
+Add `PyMuPDF` as a fallback or cross-check after PDF generation.
+
+Why:
+
+- It can render PDF pages directly from Python.
+- It reduces dependence on a single `pdftoppm` rasterization path.
+- It enables side-by-side renderer disagreement checks.
+
+Suggested use:
+
+- Keep `pdftoppm` as default.
+- Use `PyMuPDF` when `pdftoppm` is missing or when L1 results look suspicious.
+- Optionally compare page count, dimensions, and coarse ink maps between both
+  renderers.
+
+### 2. Add stronger image analysis
+
+Add `numpy` plus either `opencv-python` or `scikit-image`.
+
+Useful checks:
+
+- text/image bounding boxes near page edges;
+- connected-component analysis for tiny clipped fragments;
+- large empty regions after expected content starts;
+- overlap heuristics based on dense connected regions;
+- diff heatmaps between template render and generated render.
+
+This would upgrade L1 from simple pixel proxies to richer deterministic layout
+proxies.
+
+### 3. Add optional OCR
+
+Add OCR only as an optional capability, not a hard dependency.
+
+Candidate stack:
+
+- `tesseract` binary;
+- `pytesseract` Python wrapper.
+
+Useful cases:
+
+- visible template placeholders rendered inside text boxes or shapes;
+- residual demo text that OOXML extraction misses;
+- table-of-contents caches that render old text even when fields are marked
+  dirty.
+
+OCR should be used as an advisory signal because it can be noisy across fonts,
+languages, and image quality.
+
+### 4. Improve TOC/cache handling
+
+The current DOCX flow marks TOC fields dirty, but headless LibreOffice may still
+render stale cached field results from the template.
+
+Potential fixes:
+
+- clear or rebuild the visible TOC field result cache before render;
+- generate a simplified static TOC when the template allows it;
+- add an L1/L2 checklist item for stale TOC/demo entries;
+- use OCR or text extraction from rendered PDF to detect stale visible TOC text.
+
+This matters because the visual audit can be technically successful while the
+render still shows stale cached entries.
+
+### 5. Store environment diagnostics in the manifest
+
+Extend `visual_manifest.json` with:
+
+- renderer binary paths;
+- renderer versions;
+- OS/platform;
+- DPI;
+- fallback mode;
+- `doctor` status summary;
+- install/repair hints when degraded.
+
+This makes audit failures easier to reproduce and compare across machines.
+
+### 6. Add renderer policy per QA mode
+
+Suggested policy:
+
+- `fast`: L0 only, never touches renderers.
+- `auto`: L0 plus visual render when the full pipeline is available.
+- `deep`: preflight first; prefer full render; if unavailable, produce degraded
+  manifest and say exactly what is unproven.
+- future `strict`: fail if full render is unavailable or if L1/L2 checks are not
+  clean.
+
+### 7. Keep Playwright out of the Office core path
+
+`Playwright` is useful for HTML/web preview audits, but it should not become the
+primary Office renderer. Browser screenshots vary by OS/browser environment and
+do not model Word/PowerPoint/Excel layout. It is better as a future companion for
+HTML exports or dashboards, not as the main Office audit engine.
+
+## Priority order
+
+1. Keep the current LibreOffice + Poppler + Pillow path stable.
+2. Make preflight mandatory in every skill workflow.
+3. Add manifest diagnostics for degraded visual audits.
+4. Fix stale TOC/cache rendering.
+5. Add `PyMuPDF` fallback/cross-check.
+6. Add richer image analysis with `numpy` and `opencv-python` or `scikit-image`.
+7. Add optional OCR for residual visible text.

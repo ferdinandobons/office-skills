@@ -11,10 +11,13 @@ binaries are present (skipped in CI).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,12 +146,38 @@ class L1ProxyTest(unittest.TestCase):
 
 
 class RendererAvailabilityTest(unittest.TestCase):
+    def test_doctor_prints_install_hints_for_missing_dependencies(self) -> None:
+        orig_probe = doctor.probe
+        try:
+            doctor.probe = lambda: {
+                "python_deps": {"docx": False, "pptx": True, "openpyxl": True, "lxml": True, "PIL": True},
+                "binaries": {"soffice": False, "pdftoppm": False},
+                "binary_paths": {"soffice": None, "pdftoppm": None},
+                "binary_errors": {},
+                "visual_qa": False,
+            }
+            buf = StringIO()
+            with redirect_stdout(buf):
+                doctor.print_report()
+        finally:
+            doctor.probe = orig_probe
+
+        out = buf.getvalue()
+        self.assertIn("install:python:", out)
+        self.assertIn("pip install -r requirements.txt", out)
+        self.assertIn("install:soffice:", out)
+        self.assertIn("libreoffice", out)
+        self.assertIn("install:pdftoppm:", out)
+        self.assertIn("poppler", out)
+
     def test_probe_marks_visual_unavailable_when_binary_probe_fails(self) -> None:
         """PATH presence alone is not enough; broken renderers must degrade."""
         orig_which = doctor.shutil.which
         orig_run = subprocess.run
+        orig_sig = doctor._soffice_app_signature_error
         try:
             doctor.shutil.which = lambda name: f"/fake/{name}"
+            doctor._soffice_app_signature_error = lambda path: None
 
             def fake_run(*args, **kwargs):
                 return SimpleNamespace(returncode=134, stdout=b"", stderr=b"abort")
@@ -158,17 +187,50 @@ class RendererAvailabilityTest(unittest.TestCase):
         finally:
             doctor.shutil.which = orig_which
             subprocess.run = orig_run
+            doctor._soffice_app_signature_error = orig_sig
 
         self.assertFalse(status["binaries"]["soffice"])
         self.assertFalse(status["visual_qa"])
+
+    def test_probe_marks_soffice_unusable_when_macos_signature_invalid(self) -> None:
+        orig_which = doctor.shutil.which
+        orig_run = subprocess.run
+        orig_sig = doctor._soffice_app_signature_error
+        calls = []
+        try:
+            doctor.shutil.which = lambda name: f"/fake/{name}"
+            doctor._soffice_app_signature_error = (
+                lambda path: "LibreOffice.app signature invalid: bad signature"
+                if path.endswith("soffice") else None
+            )
+
+            def fake_run(args, *unused_args, **unused_kwargs):
+                calls.append(list(args))
+                if args[0].endswith("soffice"):
+                    raise AssertionError("invalid soffice app must not be launched")
+                return SimpleNamespace(returncode=0, stdout=b"version ok", stderr=b"")
+
+            subprocess.run = fake_run
+            status = doctor.probe()
+        finally:
+            doctor.shutil.which = orig_which
+            subprocess.run = orig_run
+            doctor._soffice_app_signature_error = orig_sig
+
+        self.assertFalse(status["binaries"]["soffice"])
+        self.assertFalse(status["visual_qa"])
+        self.assertIn("signature invalid", status["binary_errors"]["soffice"])
+        self.assertFalse(any(call[0].endswith("soffice") for call in calls))
 
     def test_probe_marks_visual_unavailable_when_conversion_probe_fails(self) -> None:
         """Version commands can pass while headless conversion is unusable."""
         orig_which = doctor.shutil.which
         orig_run = subprocess.run
+        orig_sig = doctor._soffice_app_signature_error
         calls = []
         try:
             doctor.shutil.which = lambda name: f"/fake/{name}"
+            doctor._soffice_app_signature_error = lambda path: None
 
             def fake_run(args, *unused_args, **unused_kwargs):
                 calls.append(list(args))
@@ -181,6 +243,7 @@ class RendererAvailabilityTest(unittest.TestCase):
         finally:
             doctor.shutil.which = orig_which
             subprocess.run = orig_run
+            doctor._soffice_app_signature_error = orig_sig
 
         self.assertTrue(status["binaries"]["soffice"])
         self.assertTrue(status["binaries"]["pdftoppm"])
@@ -191,8 +254,10 @@ class RendererAvailabilityTest(unittest.TestCase):
     def test_probe_marks_visual_unavailable_when_conversion_times_out(self) -> None:
         orig_which = doctor.shutil.which
         orig_run = subprocess.run
+        orig_sig = doctor._soffice_app_signature_error
         try:
             doctor.shutil.which = lambda name: f"/fake/{name}"
+            doctor._soffice_app_signature_error = lambda path: None
 
             def fake_run(args, *unused_args, **unused_kwargs):
                 if "--convert-to" in args:
@@ -204,6 +269,7 @@ class RendererAvailabilityTest(unittest.TestCase):
         finally:
             doctor.shutil.which = orig_which
             subprocess.run = orig_run
+            doctor._soffice_app_signature_error = orig_sig
 
         self.assertFalse(status["visual_qa"])
         self.assertIn("timed out", status["binary_errors"]["visual_qa"])
@@ -355,6 +421,220 @@ class GateWiringTest(unittest.TestCase):
         finally:
             vqa.renderers_available = orig
 
+    def test_run_qa_deep_degraded_writes_manifest(self) -> None:
+        orig = vqa.renderers_available
+        orig_render = vqa.render_to_pngs
+        vqa.renderers_available = lambda: False
+        vqa.render_to_pngs = lambda *args, **kwargs: []
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                report = gate.run_qa(
+                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                )
+                unavailable = [f for f in report.findings if f.check == "visual.unavailable"]
+                self.assertEqual(len(unavailable), 1)
+                manifest = [f for f in report.findings if f.check == "visual.manifest"]
+                self.assertEqual(len(manifest), 1)
+                self.assertEqual(manifest[0].severity, schema.Severity.INFO.value)
+                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+            self.assertTrue(data["degraded"])
+            self.assertEqual(data["pages"], [])
+            self.assertTrue(data["checklist"])
+            self.assertTrue(report.passed)
+        finally:
+            vqa.renderers_available = orig
+            vqa.render_to_pngs = orig_render
+
+    def test_run_qa_deep_uses_quicklook_when_primary_unavailable(self) -> None:
+        orig_available = vqa.renderers_available
+        orig_render = vqa.render_to_pngs
+        vqa.renderers_available = lambda: False
+
+        def fake_render(*args, **kwargs):
+            self.assertTrue(kwargs.get("quicklook_only"))
+            warnings = kwargs.get("render_warnings")
+            if warnings is not None:
+                warnings.append("Quick Look thumbnail fallback used because LibreOffice is unavailable")
+            out_dir = Path(args[1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            png = out_dir / "page-1.png"
+            _centered_content().save(png)
+            return [png]
+
+        vqa.render_to_pngs = fake_render
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                report = gate.run_qa(
+                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                )
+                manifest = [f for f in report.findings if f.check == "visual.manifest"]
+                self.assertEqual(len(manifest), 1)
+                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+            self.assertTrue(any(f.check == "visual.unavailable" for f in report.findings))
+            degraded = [f for f in report.findings if f.check == "visual.render_degraded"]
+            self.assertEqual(len(degraded), 1)
+            self.assertEqual(len(data["pages"]), 1)
+            self.assertTrue(data["degraded"])
+        finally:
+            vqa.renderers_available = orig_available
+            vqa.render_to_pngs = orig_render
+
+    def test_run_qa_deep_reports_render_failure_after_probe(self) -> None:
+        orig_available = vqa.renderers_available
+        orig_render = vqa.render_to_pngs
+        vqa.renderers_available = lambda: True
+
+        def fake_render(*args, **kwargs):
+            errors = kwargs.get("render_errors")
+            if errors is not None:
+                errors.append("soffice convert failed: abort trap")
+            return []
+
+        vqa.render_to_pngs = fake_render
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                report = gate.run_qa(
+                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                )
+                failed = [f for f in report.findings if f.check == "visual.render_failed"]
+                self.assertEqual(len(failed), 1)
+                self.assertIn("abort trap", failed[0].message)
+                manifest = [f for f in report.findings if f.check == "visual.manifest"]
+                self.assertEqual(len(manifest), 1)
+                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+            self.assertTrue(data["degraded"])
+            self.assertTrue(report.passed)
+        finally:
+            vqa.renderers_available = orig_available
+            vqa.render_to_pngs = orig_render
+
+    def test_run_qa_deep_reports_degraded_render_when_fallback_used(self) -> None:
+        orig_available = vqa.renderers_available
+        orig_render = vqa.render_to_pngs
+        vqa.renderers_available = lambda: True
+
+        def fake_render(*args, **kwargs):
+            warnings = kwargs.get("render_warnings")
+            if warnings is not None:
+                warnings.append("Quick Look thumbnail fallback used after soffice failure")
+            out_dir = Path(args[1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            png = out_dir / "page-1.png"
+            _centered_content().save(png)
+            return [png]
+
+        vqa.render_to_pngs = fake_render
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                report = gate.run_qa(
+                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                )
+            degraded = [f for f in report.findings if f.check == "visual.render_degraded"]
+            self.assertEqual(len(degraded), 1)
+            self.assertIn("Quick Look", degraded[0].message)
+            self.assertFalse(any(f.check == "visual.render_failed" for f in report.findings))
+        finally:
+            vqa.renderers_available = orig_available
+            vqa.render_to_pngs = orig_render
+
+    def test_render_to_pngs_can_skip_availability_recheck(self) -> None:
+        orig_available = vqa.renderers_available
+        orig_run = subprocess.run
+
+        def boom_available():  # pragma: no cover - must not be called
+            raise AssertionError("availability already checked by gate")
+
+        def fake_run(args, *unused_args, **unused_kwargs):
+            if "--convert-to" in args:
+                outdir = Path(args[args.index("--outdir") + 1])
+                outdir.mkdir(parents=True, exist_ok=True)
+                (outdir / "out.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+                return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+            if args and Path(args[0]).name == "pdftoppm":
+                prefix = Path(args[-1])
+                _centered_content().save(prefix.with_name(prefix.name + "-1.png"))
+                return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        vqa.renderers_available = boom_available
+        subprocess.run = fake_run
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                pngs = vqa.render_to_pngs(
+                    target, out_dir, check_available=False,
+                )
+            self.assertEqual([p.name for p in pngs], ["page-1.png"])
+        finally:
+            vqa.renderers_available = orig_available
+            subprocess.run = orig_run
+
+    def test_render_to_pngs_falls_back_to_quicklook_thumbnail(self) -> None:
+        orig_run = subprocess.run
+        orig_which = vqa.shutil.which
+
+        def fake_which(name):
+            if name in {"qlmanage", "soffice", "pdftoppm"}:
+                return f"/fake/{name}"
+            return None
+
+        def fake_run(args, *unused_args, **unused_kwargs):
+            exe = Path(args[0]).name
+            if "--convert-to" in args:
+                return SimpleNamespace(returncode=134, stdout=b"", stderr=b"abort trap")
+            if exe == "qlmanage":
+                outdir = Path(args[args.index("-o") + 1])
+                doc = Path(args[-1])
+                _centered_content().save(outdir / f"{doc.name}.png")
+                return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+            if exe == "pdftoppm":
+                raise AssertionError("pdftoppm should not run after soffice failure fallback")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        subprocess.run = fake_run
+        vqa.shutil.which = fake_which
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                target = td / "out.docx"
+                out_dir = td / "out.visual"
+                _real_docx(target)
+                warnings: list[str] = []
+                errors: list[str] = []
+                pngs = vqa.render_to_pngs(
+                    target,
+                    out_dir,
+                    check_available=False,
+                    quicklook_only=False,
+                    render_errors=errors,
+                    render_warnings=warnings,
+                )
+            self.assertEqual([p.name for p in pngs], ["page-1.png"])
+            self.assertTrue(any("Quick Look" in w for w in warnings))
+            self.assertTrue(any("soffice convert failed" in e for e in errors))
+        finally:
+            subprocess.run = orig_run
+            vqa.shutil.which = orig_which
+
     def test_run_qa_deep_injected_visual(self) -> None:
         """Drive ``deep`` without soffice via the ``visual=`` injection hook."""
         with tempfile.TemporaryDirectory() as td:
@@ -486,7 +766,17 @@ class BackwardCompatTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # §7.5 Gated real end-to-end render (skipped in CI)
 # ---------------------------------------------------------------------------
-@unittest.skipUnless(vqa.renderers_available(), "no soffice/pdftoppm renderers")
+def _real_render_requested() -> bool:
+    return (
+        os.environ.get("BRANDDOCS_RUN_REAL_RENDER") == "1"
+        and vqa.renderers_available()
+    )
+
+
+@unittest.skipUnless(
+    _real_render_requested(),
+    "set BRANDDOCS_RUN_REAL_RENDER=1 to run real soffice/pdftoppm render tests",
+)
 class RealRenderE2ETest(unittest.TestCase):
     def test_render_produces_ordered_pngs(self) -> None:
         with tempfile.TemporaryDirectory() as td:

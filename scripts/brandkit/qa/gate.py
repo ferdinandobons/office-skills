@@ -13,9 +13,10 @@ mode asks for it (``auto``/``deep``):
     loop. The engine never calls a model.
 
 Backward-compat: ``fast`` and ``target is None`` never touch the visual path;
-when renderers are absent (CI) ``auto``/``deep`` degrade to L0 plus a single INFO
-``visual.unavailable`` finding. The PNGs and manifest are SIDE artifacts in an
-out dir next to the output; the generated document's bytes never change.
+when renderers are absent (CI) ``auto`` degrades to L0 plus a single INFO
+``visual.unavailable`` finding; ``deep`` also writes a degraded manifest so the
+orchestrator still has the L2 checklist. The PNGs and manifest are SIDE artifacts
+in an out dir next to the output; the generated document's bytes never change.
 """
 from __future__ import annotations
 
@@ -110,8 +111,8 @@ def _run_visual_audit(
       * ``fast`` or ``target is None`` -> no visual path at all (``[]``). This is
         the pillar of backward-compat: every smoke test uses ``--qa fast`` and so
         never imports or touches the visual module.
-      * ``auto``/``deep`` with renderers ABSENT -> a single INFO
-        ``visual.unavailable`` (clean degrade to L0; no ERROR, no verdict change).
+      * ``auto``/``deep`` with renderers ABSENT -> INFO ``visual.unavailable``;
+        ``deep`` additionally writes a degraded manifest with the checklist.
       * ``auto`` with renderers present -> L0 + L1 pixel proxies.
       * ``deep`` with renderers present -> L0 + L1 + a written manifest, signalled
         back via an INFO ``visual.manifest`` carrying the manifest path so the
@@ -133,28 +134,95 @@ def _run_visual_audit(
         renderers_ok = vqa.renderers_available()
         png_paths = []
 
+    resolved_out = Path(out_dir) if out_dir is not None else vqa.default_out_dir(target)
+
     if not renderers_ok:
-        return [Finding(
+        findings = [Finding(
             "visual.unavailable",
             schema.Severity.INFO.value,
             "visual QA unavailable (soffice/pdftoppm absent); L0 only",
         )]
+        if qa == "deep":
+            render_errors: list[str] = []
+            render_warnings: list[str] = []
+            png_paths = vqa.render_to_pngs(
+                target,
+                resolved_out,
+                check_available=False,
+                quicklook_only=True,
+                render_errors=render_errors,
+                render_warnings=render_warnings,
+            )
+            findings.extend(vqa.run_visual_l1(png_paths))
+            for warning in render_warnings:
+                findings.append(Finding(
+                    "visual.render_degraded",
+                    schema.Severity.WARNING.value,
+                    warning,
+                ))
+            if not png_paths:
+                detail = render_errors[-1] if render_errors else "renderer produced no pages"
+                findings.append(Finding(
+                    "visual.render_failed",
+                    schema.Severity.WARNING.value,
+                    f"visual fallback render failed: {detail}",
+                ))
+                findings.extend(vqa.check_page_count_sane(png_paths))
+            manifest = vqa.build_visual_manifest(
+                profile=profile,
+                document=target,
+                png_paths=png_paths,
+                l1_findings=findings,
+                renderers_ok=bool(png_paths),
+                out_dir=resolved_out,
+                degraded=True,
+            )
+            findings.append(Finding(
+                "visual.manifest",
+                schema.Severity.INFO.value,
+                f"degraded visual audit manifest written: {manifest}",
+                location=str(manifest),
+            ))
+        return findings
 
-    resolved_out = Path(out_dir) if out_dir is not None else vqa.default_out_dir(target)
+    render_errors: list[str] = []
+    render_warnings: list[str] = []
     if visual is None:
-        png_paths = vqa.render_to_pngs(target, resolved_out)
+        png_paths = vqa.render_to_pngs(
+            target,
+            resolved_out,
+            check_available=False,
+            render_errors=render_errors,
+            render_warnings=render_warnings,
+        )
 
     findings: list[Finding] = list(vqa.run_visual_l1(png_paths))
+    if visual is None and render_warnings:
+        for warning in render_warnings:
+            findings.append(Finding(
+                "visual.render_degraded",
+                schema.Severity.WARNING.value,
+                warning,
+            ))
+    if visual is None and not png_paths:
+        detail = render_errors[-1] if render_errors else "renderer produced no pages"
+        findings.append(Finding(
+            "visual.render_failed",
+            schema.Severity.WARNING.value,
+            f"visual render failed after renderer probe: {detail}",
+        ))
     findings.extend(vqa.check_page_count_sane(png_paths))
 
     if qa == "deep":
+        manifest_renderers_ok = renderers_ok if visual is not None else bool(png_paths)
         manifest = vqa.build_visual_manifest(
             profile=profile,
             document=target,
             png_paths=png_paths,
             l1_findings=findings,
-            renderers_ok=True,
+            renderers_ok=manifest_renderers_ok,
             out_dir=resolved_out,
+            degraded=bool(render_warnings) or not manifest_renderers_ok,
         )
         findings.append(Finding(
             "visual.manifest",

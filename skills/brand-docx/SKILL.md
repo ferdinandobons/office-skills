@@ -39,6 +39,7 @@ template's preserved cover/index structures with the new content. See
 ## Hard Rules
 
 - Treat `python scripts/brandkit/cli.py ...` as an internal engine command, not the user-facing workflow.
+- Run the dependency preflight before starting extract / comprehend / verify / generate, and report missing or unusable dependencies before proceeding.
 - Extract opens the source template read-only and saves `brand-kit/<name>/template/shell.docx` byte-for-byte.
 - Generate opens the saved shell and resolves every semantic block through `profile.json`.
 - Do not put style names, colors, fonts, or brand identifiers in an IntermediateDocument.
@@ -46,15 +47,36 @@ template's preserved cover/index structures with the new content. See
 - Return the generated file path plus a QA summary.
 - Consult `profile.json.artifact_catalog` before generation when the user asks to mimic a specific piece of the template.
 
+## Preflight (always first)
+
+Before doing any work, run:
+
+```bash
+python scripts/brandkit/cli.py doctor
+```
+
+Use its output to decide the run mode:
+
+- If a required Python dependency is missing, install/repair it before extraction
+  or generation; the core engine is not ready.
+- If only visual renderers are missing or unusable (`soffice` / `pdftoppm`), the
+  core L0 workflow can still run, but a full visual audit cannot be claimed.
+  Tell the user what is missing, include the install/repair hint printed by
+  `doctor`, and either proceed with degraded QA or install the renderer first.
+- For `--qa deep`, prefer repairing/installing renderers before generation. If
+  the environment cannot run them, generate a degraded manifest and state clearly
+  that the L2 visual proof is incomplete.
+
 ## Agent Workflow
 
-1. Determine the brand name and locate the user-provided `.docx` template.
-2. If no matching `brand-kit/<name>` exists, **extract** one.
-3. **Comprehend** the template (optional, model-driven) — see below. Skip when a
+1. Run the dependency preflight above and report any degraded capability.
+2. Determine the brand name and locate the user-provided `.docx` template.
+3. If no matching `brand-kit/<name>` exists, **extract** one.
+4. **Comprehend** the template (optional, model-driven) — see below. Skip when a
    current comprehension is already cached or no model is available.
-4. Convert the user's requested content into `IntermediateDocument` JSON.
-5. **Generate** the `.docx` with the internal engine.
-6. Run **QA** and report any warnings honestly.
+5. Convert the user's requested content into `IntermediateDocument` JSON.
+6. **Generate** the `.docx` with the internal engine.
+7. Run **QA** and report any warnings honestly.
 
 ## Internal Extract
 

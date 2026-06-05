@@ -75,6 +75,13 @@ def generate(
     # also removes its introducing heading (the orphan-index-heading fix).
     removed_refs = _reconcile_indexes_and_demo(doc, profile, idoc, sink)
 
+    # Caption-index reconciliation can expose blank TOC separators and preserved
+    # demo-body section breaks at the start of the body slot. Prune them only when
+    # this generation actually removed such structure; otherwise keep historical
+    # multi-section geometry byte-for-byte.
+    if removed_refs:
+        structure.prune_leading_empty_body_artifacts(doc)
+
     # Fill the preserved cover anchors in place (never recreate the cover). Returns
     # the set of cover anchor refs the reconciliation CLEARED, for the destructive
     # floor below.

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -101,6 +102,10 @@ def render_to_pngs(
     *,
     dpi: int = DEFAULT_DPI,
     timeout_s: int = RENDER_TIMEOUT_S,
+    check_available: bool = True,
+    quicklook_only: bool = False,
+    render_errors: list[str] | None = None,
+    render_warnings: list[str] | None = None,
 ) -> list[Path]:
     """Render a ``.docx``/``.pptx``/``.xlsx`` to an ordered list of per-page PNGs.
 
@@ -111,7 +116,12 @@ def render_to_pngs(
     Clean degrade: returns ``[]`` if :func:`renderers_available` is False, if
     ``soffice``/``pdftoppm`` fail (non-zero rc), time out, or produce no
     PDF/PNG. NEVER raises -- the render is a side artifact whose failure must not
-    break the gate.
+    break the gate. ``check_available=False`` is used by the QA gate after it has
+    already performed the availability probe, avoiding a second ``soffice``
+    launch on macOS. ``quicklook_only=True`` skips LibreOffice entirely and emits
+    a single macOS Quick Look thumbnail, used when the primary pipeline is known
+    to be broken. ``render_errors`` / ``render_warnings`` are optional out-params
+    for diagnostics.
 
     The PDF is written to an internal ``TemporaryDirectory``; the PNGs go to
     ``out_dir`` (the working/out dir the caller passes), never inside the
@@ -119,7 +129,8 @@ def render_to_pngs(
     ``page-*.png`` are removed first so a repair-loop re-run is not confused by
     stale frames.
     """
-    if not renderers_available():
+    if check_available and not renderers_available():
+        _append_render_error(render_errors, "visual renderers unavailable")
         return []
 
     document = Path(document)
@@ -136,29 +147,185 @@ def render_to_pngs(
             except OSError:
                 pass
 
+        if quicklook_only:
+            return _render_quicklook_thumbnail(
+                document, out_dir, timeout_s=timeout_s,
+                render_errors=render_errors, render_warnings=render_warnings,
+                reason="because LibreOffice visual pipeline is unavailable",
+            )
+
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
+            pdf_dir = tmp / "pdf"
+            pdf_dir.mkdir()
+            lo_profile = tmp / "lo-profile"
             soffice = subprocess.run(
-                ["soffice", "--headless", "--convert-to", "pdf",
-                 "--outdir", str(tmp), str(document)],
+                _soffice_convert_cmd(document, pdf_dir, lo_profile),
                 capture_output=True, timeout=timeout_s, check=False,
             )
             if soffice.returncode != 0:
-                return []
-            pdfs = list(tmp.glob("*.pdf"))
+                _append_render_error(
+                    render_errors,
+                    "soffice convert failed: "
+                    + (_short_output(soffice.stderr)
+                       or _short_output(soffice.stdout)
+                       or f"exit code {soffice.returncode}"),
+                )
+                return _render_quicklook_thumbnail(
+                    document, out_dir, timeout_s=timeout_s,
+                    render_errors=render_errors, render_warnings=render_warnings,
+                    reason="after soffice failure",
+                )
+            pdfs = list(pdf_dir.glob("*.pdf"))
             if not pdfs:
-                return []
+                _append_render_error(render_errors, "soffice convert produced no PDF")
+                return _render_quicklook_thumbnail(
+                    document, out_dir, timeout_s=timeout_s,
+                    render_errors=render_errors, render_warnings=render_warnings,
+                    reason="after soffice produced no PDF",
+                )
             pdf = pdfs[0]
             toppm = subprocess.run(
                 ["pdftoppm", "-png", "-r", str(dpi), str(pdf), str(out_dir / "page")],
                 capture_output=True, timeout=timeout_s, check=False,
             )
             if toppm.returncode != 0:
-                return []
-    except (subprocess.TimeoutExpired, OSError):
+                _append_render_error(
+                    render_errors,
+                    "pdftoppm failed: "
+                    + (_short_output(toppm.stderr)
+                       or _short_output(toppm.stdout)
+                       or f"exit code {toppm.returncode}"),
+                )
+                return _render_quicklook_thumbnail(
+                    document, out_dir, timeout_s=timeout_s,
+                    render_errors=render_errors, render_warnings=render_warnings,
+                    reason="after pdftoppm failure",
+                )
+    except subprocess.TimeoutExpired as exc:
+        _append_render_error(render_errors, f"render timed out: {exc}")
+        return []
+    except OSError as exc:
+        _append_render_error(render_errors, f"render failed: {exc}")
         return []
 
-    return sorted(out_dir.glob("page-*.png"), key=_page_sort_key)
+    pngs = sorted(out_dir.glob("page-*.png"), key=_page_sort_key)
+    if not pngs:
+        _append_render_error(render_errors, "pdftoppm produced no PNG")
+    return pngs
+
+
+def _render_quicklook_thumbnail(
+    document: Path,
+    out_dir: Path,
+    *,
+    timeout_s: int,
+    render_errors: list[str] | None,
+    render_warnings: list[str] | None,
+    reason: str,
+) -> list[Path]:
+    """Fallback renderer for macOS when LibreOffice crashes.
+
+    Quick Look returns a single thumbnail, not a faithful multi-page render. It is
+    therefore a degraded audit input: good enough to run pixel proxies and give
+    the L2 checklist something visual to inspect, but never a replacement for the
+    full LibreOffice PDF pipeline.
+    """
+    qlmanage = shutil.which("qlmanage")
+    if qlmanage is None:
+        _append_render_error(render_errors, "Quick Look fallback unavailable: qlmanage not found")
+        return []
+    try:
+        proc = subprocess.run(
+            [qlmanage, "-t", "-s", "1200", "-o", str(out_dir), str(document)],
+            capture_output=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        _append_render_error(render_errors, f"Quick Look fallback timed out: {exc}")
+        return []
+    except OSError as exc:
+        _append_render_error(render_errors, f"Quick Look fallback failed: {exc}")
+        return []
+    if proc.returncode != 0:
+        _append_render_error(
+            render_errors,
+            "Quick Look fallback failed: "
+            + (_short_output(proc.stderr)
+               or _short_output(proc.stdout)
+               or f"exit code {proc.returncode}"),
+        )
+        return []
+
+    produced = out_dir / f"{document.name}.png"
+    if not produced.is_file():
+        matches = sorted(out_dir.glob("*.png"))
+        produced = matches[0] if matches else produced
+    if not produced.is_file():
+        _append_render_error(render_errors, "Quick Look fallback produced no PNG")
+        return []
+
+    target = out_dir / "page-1.png"
+    if produced != target:
+        try:
+            if target.exists():
+                target.unlink()
+            produced.replace(target)
+        except OSError as exc:
+            _append_render_error(render_errors, f"Quick Look fallback could not stage PNG: {exc}")
+            return []
+
+    _append_render_warning(
+        render_warnings,
+        f"Quick Look thumbnail fallback used {reason}; "
+        "audit is first-page-only and degraded",
+    )
+    return [target]
+
+
+def _soffice_convert_cmd(document: Path, pdf_dir: Path, lo_profile: Path) -> list[str]:
+    """Build a headless LibreOffice conversion command with an isolated profile.
+
+    LibreOffice on macOS may try to recover or lock the user's normal profile even
+    for headless conversion. A per-render ``UserInstallation`` keeps the visual
+    audit isolated and reduces crash/recovery-dialog coupling with the desktop app.
+    """
+    return [
+        "soffice",
+        f"-env:UserInstallation={lo_profile.as_uri()}",
+        "--headless",
+        "--nologo",
+        "--nodefault",
+        "--nolockcheck",
+        "--norestore",
+        "--nofirststartwizard",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(pdf_dir),
+        str(document),
+    ]
+
+
+def _append_render_error(errors: list[str] | None, message: str) -> None:
+    if errors is not None and message:
+        errors.append(message)
+
+
+def _append_render_warning(warnings: list[str] | None, message: str) -> None:
+    if warnings is not None and message:
+        warnings.append(message)
+
+
+def _short_output(data) -> str:
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        text = data.decode("utf-8", errors="replace")
+    else:
+        text = str(data)
+    return " ".join(text.strip().split())[:240]
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +623,7 @@ def build_visual_manifest(
     l1_findings: list[Finding],
     renderers_ok: bool,
     out_dir: str | Path,
+    degraded: bool | None = None,
 ) -> Path:
     """Build and write ``<out_dir>/visual_manifest.json`` (a SIDE artifact).
 
@@ -514,7 +682,9 @@ def build_visual_manifest(
             "yours."
         ),
     }
-    if not renderers_ok:
+    if degraded is None:
+        degraded = not renderers_ok
+    if degraded:
         manifest["degraded"] = True
 
     path = out_dir / MANIFEST_FILENAME

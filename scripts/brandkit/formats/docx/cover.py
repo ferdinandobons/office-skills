@@ -297,10 +297,32 @@ def compose_cover(
     if cover is None:
         return set()
 
+    _sync_core_properties(doc, cover)
+
     comp = _present_comprehension(profile)
     if comp is not None and comp.get("cover_slots"):
         return _compose_cover_comprehended(doc, cover, profile, comp, sink)
     return _compose_cover_deterministic(doc, cover, profile, sink)
+
+
+def _sync_core_properties(doc, cover: Cover) -> None:
+    """Keep Word document properties aligned with generated cover content.
+
+    Corporate templates often render cover text through DOCPROPERTY fields or
+    SDTs bound to ``docProps/core.xml``. If generation updates only the visible
+    body text, LibreOffice/Word can refresh those fields back to stale values like
+    "Titolo" / "Descrizione". Syncing the core properties makes field refreshes
+    render the generated cover.
+    """
+    props = getattr(doc, "core_properties", None)
+    if props is None:
+        return
+    title = textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", ""))
+    subtitle = textutil.runs_to_text(cover.subtitle or []) or str(cover.fields.get("subtitle", ""))
+    if title:
+        props.title = title
+    if subtitle:
+        props.subject = subtitle
 
 
 def _present_comprehension(profile: dict) -> Optional[dict]:
