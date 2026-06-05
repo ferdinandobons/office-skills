@@ -147,7 +147,7 @@ def _extract_real_profile(td: Path) -> dict:
     from brandkit.formats.docx import extract as docx_extract
     from brandkit.profile import store
 
-    template = Path(__file__).resolve().parents[1] / "examples" / "templates" / "docuskills_template.docx"
+    template = Path(__file__).resolve().parents[1] / "examples" / "templates" / "branddocs_template.docx"
     docx_extract.extract(template, "vqa", scope="project", cwd=td)
     return store.load_profile("vqa", "project", cwd=td).profile
 
@@ -423,7 +423,7 @@ class RealRenderE2ETest(unittest.TestCase):
             td = Path(td)
             template = (
                 Path(__file__).resolve().parents[1]
-                / "examples" / "templates" / "docuskills_template.docx"
+                / "examples" / "templates" / "branddocs_template.docx"
             )
             out_dir = td / "render"
             pngs = vqa.render_to_pngs(template, out_dir)
@@ -444,7 +444,7 @@ class RealRenderE2ETest(unittest.TestCase):
             try:
                 template = (
                     Path(__file__).resolve().parents[1]
-                    / "examples" / "templates" / "docuskills_template.docx"
+                    / "examples" / "templates" / "branddocs_template.docx"
                 )
                 self.assertEqual(
                     main(["extract", "--name", "e2e", "--template", str(template),

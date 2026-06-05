@@ -6,7 +6,7 @@ Two invariants, both scoped to *git-tracked* files (so gitignored scratch such a
 
 1. No Office binary (``.docx``/``.pptx``/``.xlsx``/legacy) is tracked anywhere
    except ``tests/fixtures/`` (test data) or ``examples/`` (curated, 100% synthetic
-   DocuSkills demo templates, each with a reproducible builder) - real company
+   BrandDocs demo templates, each with a reproducible builder) - real company
    templates and generated samples must never be committed, regardless of filename.
 2. No tracked source imports Bedrock/boto3 or a vendored proprietary Office helper
    package (``office.*``) - the engine is self-contained.
@@ -27,7 +27,7 @@ FORBIDDEN_RUNTIME_PATTERNS = (
 OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"}
 TEXT_SUFFIXES = {".py", ".md", ".json", ".txt", ".svg", ".yml", ".yaml", ""}
 FIXTURES = ("tests", "fixtures")
-EXAMPLES = ("examples",)  # curated synthetic DocuSkills demo templates (built by examples/builders/*)
+EXAMPLES = ("examples",)  # curated synthetic BrandDocs demo templates (built by examples/builders/*)
 
 
 def _tracked_files(root: Path) -> list[Path]:

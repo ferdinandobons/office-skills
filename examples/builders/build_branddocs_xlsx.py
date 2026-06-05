@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Deterministic builder for the COMPLEX synthetic XLSX example template.
 
-Produces ``examples/templates/docuskills_template.xlsx``: a 100% synthetic
-(DocuSkills-style, never proprietary) workbook that stresses the brand-xlsx engine
+Produces ``examples/templates/branddocs_template.xlsx``: a 100% synthetic
+(BrandDocs-style, never proprietary) workbook that stresses the brand-xlsx engine
 across as many Excel component types as openpyxl can author:
 
   * MULTIPLE sheets in a deliberate tab order (Cover, Inputs, Model, Summary,
@@ -17,22 +17,22 @@ across as many Excel component types as openpyxl can author:
     reference (Summary pulls from Model and Inputs), and a SUBTOTAL - all
     authored verbatim so we can later assert they survive generation byte-exact.
   * NUMBER FORMATS: currency (accounting), percent, thousands, and ISO date.
-  * A native TABLE object (``DocuSkillsDataTbl``) with a banded table style.
+  * A native TABLE object (``BrandDocsDataTbl``) with a banded table style.
   * CONDITIONAL FORMATTING: a color scale, a cell-is rule, and a formula rule.
   * FROZEN PANES on the data sheets.
-  * The shared DocuSkills brand MARK (the assets/hero.svg glyph) placed as a
+  * The shared BrandDocs brand MARK (the assets/hero.svg glyph) placed as a
     worksheet drawing on the cover brand band - rendered in-process by
-    ``_brandlib.docuskills_mark_png`` (no external/proprietary asset on disk),
+    ``_brandlib.branddocs_mark_png`` (no external/proprietary asset on disk),
     sized SQUARE so the square PNG is not distorted.
-  * Named cell STYLES (``DocuSkillsTitle``, ``DocuSkillsHeader``, ``DocuSkillsCurrency``,
-    ``DocuSkillsPercent``, ``DocuSkillsInput``) registered on the workbook and applied.
+  * Named cell STYLES (``BrandDocsTitle``, ``BrandDocsHeader``, ``BrandDocsCurrency``,
+    ``BrandDocsPercent``, ``BrandDocsInput``) registered on the workbook and applied.
   * Demo / sample data rows the generator is expected to clear.
 
 The output is byte-reproducible: a fixed timestamp / fixed image bytes / sorted
 defined names, so re-running the builder yields an identical file (CI-friendly).
 
 Run:
-    PYTHONPATH=scripts .venv/bin/python examples/builders/build_docuskills_xlsx.py
+    PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_xlsx.py
 """
 from __future__ import annotations
 
@@ -46,56 +46,56 @@ from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from _brandlib import docuskills_mark_png, freeze_ooxml
+from _brandlib import branddocs_mark_png, freeze_ooxml
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-OUT = Path(__file__).resolve().parents[1] / "templates" / "docuskills_template.xlsx"
+OUT = Path(__file__).resolve().parents[1] / "templates" / "branddocs_template.xlsx"
 
-# Synthetic DocuSkills brand palette (made-up; never proprietary).
-DOCU_NAVY = "FF16213F"
-DOCU_TEAL = "FF2B7CD3"
-DOCU_AMBER = "FFE0742B"
-DOCU_LIGHT = "FFEAF1FF"
+# Synthetic BrandDocs brand palette (made-up; never proprietary).
+BRAND_NAVY = "FF16213F"
+BRAND_TEAL = "FF2B7CD3"
+BRAND_AMBER = "FFE0742B"
+BRAND_LIGHT = "FFEAF1FF"
 WHITE = "FFFFFFFF"
 
 # 6-digit (no alpha) variants for openpyxl chart series fills, derived from the
 # brand palette constants above (no new brand literals introduced).
-NAVY6 = DOCU_NAVY[-6:]   # "16213F"
-TEAL6 = DOCU_TEAL[-6:]   # "2B7CD3"
-AMBER6 = DOCU_AMBER[-6:]  # "E0742B"
+NAVY6 = BRAND_NAVY[-6:]   # "16213F"
+TEAL6 = BRAND_TEAL[-6:]   # "2B7CD3"
+AMBER6 = BRAND_AMBER[-6:]  # "E0742B"
 
 
 # ---------------------------------------------------------------------------
 # Named cell styles (registered once on the workbook).
 # ---------------------------------------------------------------------------
 def _register_named_styles(wb: Workbook) -> None:
-    thin = Side(style="thin", color=DOCU_NAVY)
+    thin = Side(style="thin", color=BRAND_NAVY)
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    title = NamedStyle(name="DocuSkillsTitle")
-    title.font = Font(name="Arial", size=20, bold=True, color=DOCU_NAVY)
+    title = NamedStyle(name="BrandDocsTitle")
+    title.font = Font(name="Arial", size=20, bold=True, color=BRAND_NAVY)
     title.alignment = Alignment(horizontal="center", vertical="center")
 
-    header = NamedStyle(name="DocuSkillsHeader")
+    header = NamedStyle(name="BrandDocsHeader")
     header.font = Font(name="Arial", size=11, bold=True, color=WHITE)
-    header.fill = PatternFill("solid", fgColor=DOCU_NAVY)
+    header.fill = PatternFill("solid", fgColor=BRAND_NAVY)
     header.alignment = Alignment(horizontal="center", vertical="center")
     header.border = border
 
-    currency = NamedStyle(name="DocuSkillsCurrency")
+    currency = NamedStyle(name="BrandDocsCurrency")
     currency.number_format = '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)'
-    currency.font = Font(name="Calibri", size=11, color=DOCU_NAVY)
+    currency.font = Font(name="Calibri", size=11, color=BRAND_NAVY)
     currency.border = border
 
-    percent = NamedStyle(name="DocuSkillsPercent")
+    percent = NamedStyle(name="BrandDocsPercent")
     percent.number_format = "0.0%"
-    percent.font = Font(name="Calibri", size=11, color=DOCU_TEAL)
+    percent.font = Font(name="Calibri", size=11, color=BRAND_TEAL)
     percent.border = border
 
-    inp = NamedStyle(name="DocuSkillsInput")
-    inp.fill = PatternFill("solid", fgColor=DOCU_LIGHT)
-    inp.font = Font(name="Calibri", size=11, color=DOCU_NAVY)
+    inp = NamedStyle(name="BrandDocsInput")
+    inp.fill = PatternFill("solid", fgColor=BRAND_LIGHT)
+    inp.font = Font(name="Calibri", size=11, color=BRAND_NAVY)
     inp.border = border
 
     for style in (title, header, currency, percent, inp):
@@ -112,17 +112,17 @@ def _build_cover(wb: Workbook) -> None:
     ws.merge_cells("A1:E1")
     # Title band: navy fill + white title text so the cover reads as branded.
     ws["A1"] = "FY2025 Revenue Performance Review"
-    ws["A1"].style = "DocuSkillsTitle"
+    ws["A1"].style = "BrandDocsTitle"
     ws["A1"].font = Font(name="Arial", size=20, bold=True, color=WHITE)
-    ws["A1"].fill = PatternFill("solid", fgColor=DOCU_NAVY)
+    ws["A1"].fill = PatternFill("solid", fgColor=BRAND_NAVY)
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 30
     ws.merge_cells("A2:E2")
     ws["A2"] = "Quarterly revenue model and executive summary"
-    ws["A2"].font = Font(name="Arial", size=12, italic=True, color=DOCU_TEAL)
+    ws["A2"].font = Font(name="Arial", size=12, italic=True, color=BRAND_TEAL)
     ws["A2"].alignment = Alignment(horizontal="center")
     ws["A4"] = "Prepared for"
-    ws["B4"] = "DocuSkills Corp (synthetic demo)"
+    ws["B4"] = "BrandDocs Corp (synthetic demo)"
     ws["A5"] = "Reporting period"
     ws["B5"] = "FY2025 (Q1-Q4)"
     # An ISO-date cell with a date number format (pinned, deterministic).
@@ -132,9 +132,9 @@ def _build_cover(wb: Workbook) -> None:
     # A navy brand band across the printable width, below the text block.
     ws.merge_cells("A8:E8")
     for col in range(1, 6):
-        ws.cell(row=8, column=col).fill = PatternFill("solid", fgColor=DOCU_NAVY)
+        ws.cell(row=8, column=col).fill = PatternFill("solid", fgColor=BRAND_NAVY)
     ws.row_dimensions[8].height = 24
-    # Header drawing: the shared DocuSkills brand mark (same glyph as
+    # Header drawing: the shared BrandDocs brand mark (same glyph as
     # assets/hero.svg) sits on the brand band, inside the printable area
     # (A1:E9) so it no longer spills onto a second print page. The mark PNG is
     # SQUARE, so the drawing is sized SQUARE (64x64 px) to avoid distorting it.
@@ -153,11 +153,11 @@ def _build_cover(wb: Workbook) -> None:
 def _build_inputs(wb: Workbook) -> None:
     ws = wb.create_sheet("Inputs")
     ws["A1"] = "Model Inputs"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=DOCU_NAVY)
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=BRAND_NAVY)
     # Header row 3.
     for col, label in enumerate(("Driver", "Value", "Unit"), start=1):
         c = ws.cell(row=3, column=col, value=label)
-        c.style = "DocuSkillsHeader"
+        c.style = "BrandDocsHeader"
     # Input block rows 4..7 (the named INPUTS region, demo values).
     # Reconciled so Implied gross (Units * Price) == Model Gross revenue FY
     # (29070 * 50 = 1,453,500), giving Net margin = 85.0% (sensible range).
@@ -169,18 +169,18 @@ def _build_inputs(wb: Workbook) -> None:
     ]
     for i, (driver, val, unit) in enumerate(inputs):
         r = 4 + i
-        ws.cell(row=r, column=1, value=driver).style = "DocuSkillsInput"
+        ws.cell(row=r, column=1, value=driver).style = "BrandDocsInput"
         vc = ws.cell(row=r, column=2, value=val)
-        vc.style = "DocuSkillsInput"
+        vc.style = "BrandDocsInput"
         if unit == "USD":
-            vc.style = "DocuSkillsCurrency"
+            vc.style = "BrandDocsCurrency"
         elif unit == "pct":
-            vc.style = "DocuSkillsPercent"
+            vc.style = "BrandDocsPercent"
         elif unit == "ea":
             # Whole-unit counts get a thousands separator so "Units sold" reads
             # "29,070" instead of "29070" (keeps the input fill/border style).
             vc.number_format = "#,##0"
-        ws.cell(row=r, column=3, value=unit).style = "DocuSkillsInput"
+        ws.cell(row=r, column=3, value=unit).style = "BrandDocsInput"
     ws.freeze_panes = "A4"
     ws.column_dimensions["A"].width = 18
     ws.column_dimensions["B"].width = 14
@@ -189,11 +189,11 @@ def _build_inputs(wb: Workbook) -> None:
 def _build_model(wb: Workbook) -> None:
     ws = wb.create_sheet("Model")
     ws["A1"] = "Revenue Model"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=DOCU_NAVY)
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=BRAND_NAVY)
     # Header row 3 for the native table.
     headers = ("Line item", "Q1", "Q2", "Q3", "Q4", "FY Total", "% of FY")
     for col, label in enumerate(headers, start=1):
-        ws.cell(row=3, column=col, value=label).style = "DocuSkillsHeader"
+        ws.cell(row=3, column=col, value=label).style = "BrandDocsHeader"
     # Demo body rows 4..7 with cross-quarter SUM + percent-of-total formulas.
     body = [
         ("Gross revenue", 320000, 351000, 372500, 410000),
@@ -222,7 +222,7 @@ def _build_model(wb: Workbook) -> None:
     ws.cell(row=9, column=1, value="Subtotal (visible)")
     ws.cell(row=9, column=6, value="=SUBTOTAL(9,F4:F6)").number_format = "#,##0"
     # Native TABLE object over the body (header row 3 .. last data row 7).
-    table = Table(displayName="DocuSkillsDataTbl", ref="A3:G7")
+    table = Table(displayName="BrandDocsDataTbl", ref="A3:G7")
     table.tableStyleInfo = TableStyleInfo(
         name="TableStyleMedium2",
         showRowStripes=True,
@@ -244,7 +244,7 @@ def _build_model(wb: Workbook) -> None:
     ws.conditional_formatting.add(
         "G4:G7",
         CellIsRule(operator="greaterThan", formula=["0.5"],
-                   fill=PatternFill("solid", fgColor=DOCU_AMBER)),
+                   fill=PatternFill("solid", fgColor=BRAND_AMBER)),
     )
     ws.conditional_formatting.add(
         "F4:F6",
@@ -289,11 +289,11 @@ def _build_model(wb: Workbook) -> None:
 def _build_summary(wb: Workbook) -> None:
     ws = wb.create_sheet("Summary")
     ws["A1"] = "Executive Summary"
-    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=DOCU_NAVY)
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=BRAND_NAVY)
     ws["A3"] = "Metric"
     ws["B3"] = "Value"
-    ws["A3"].style = "DocuSkillsHeader"
-    ws["B3"].style = "DocuSkillsHeader"
+    ws["A3"].style = "BrandDocsHeader"
+    ws["B3"].style = "BrandDocsHeader"
     # CROSS-SHEET formulas: Summary pulls from Model and Inputs.
     ws["A4"] = "FY net revenue"
     ws["B4"] = "=Model!F7"
@@ -303,13 +303,13 @@ def _build_summary(wb: Workbook) -> None:
     ws["B5"].number_format = "#,##0"  # thousands separator: "29,070"
     ws["A6"] = "Unit price (input)"
     ws["B6"] = "=Inputs!B5"
-    ws["B6"].style = "DocuSkillsCurrency"
+    ws["B6"].style = "BrandDocsCurrency"
     ws["A7"] = "Implied gross"
     ws["B7"] = "=Inputs!B4*Inputs!B5"
-    ws["B7"].style = "DocuSkillsCurrency"
+    ws["B7"].style = "BrandDocsCurrency"
     ws["A8"] = "Net margin"
     ws["B8"] = "=IF(B7=0,0,B4/B7)"
-    ws["B8"].style = "DocuSkillsPercent"
+    ws["B8"].style = "BrandDocsPercent"
     ws["A9"] = "Headline KPI"
     ws["B9"] = "85% net margin on $1.45M gross"  # single-cell named output slot
     ws.freeze_panes = "A4"
@@ -349,7 +349,7 @@ def _build_data(wb: Workbook) -> None:
     ws = wb.create_sheet("Data")
     headers = ("Date", "Region", "Product", "Amount")
     for col, label in enumerate(headers, start=1):
-        ws.cell(row=1, column=col, value=label).style = "DocuSkillsHeader"
+        ws.cell(row=1, column=col, value=label).style = "BrandDocsHeader"
     demo = [
         ("2025-10-01", "North", "Widget", 12500),
         ("2025-10-02", "South", "Gadget", 9800),
@@ -399,10 +399,10 @@ _LOGO_CACHE: Path | None = None
 
 
 def _logo_path() -> Path:
-    """Materialize the shared DocuSkills brand mark to a temp file openpyxl can
+    """Materialize the shared BrandDocs brand mark to a temp file openpyxl can
     embed.
 
-    Uses ``docuskills_mark_png`` so the cover logo is the SAME navy rounded-square
+    Uses ``branddocs_mark_png`` so the cover logo is the SAME navy rounded-square
     glyph as ``assets/hero.svg`` (blue stroke, filled blue header bar, outlined
     blue field below). The PNG is square, so the cover drawing is sized square to
     avoid distorting it.
@@ -411,8 +411,8 @@ def _logo_path() -> Path:
     if _LOGO_CACHE is None:
         import tempfile
 
-        tmp = Path(tempfile.gettempdir()) / "docuskills_template_logo.png"
-        tmp.write_bytes(docuskills_mark_png(256))
+        tmp = Path(tempfile.gettempdir()) / "branddocs_template_logo.png"
+        tmp.write_bytes(branddocs_mark_png(256))
         _LOGO_CACHE = tmp
     return _LOGO_CACHE
 

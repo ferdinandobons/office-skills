@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Shared helpers for the DocuSkills example builders.
+"""Shared helpers for the BrandDocs example builders.
 
 Two concerns the mechanical rebrand from the synthetic source fixtures made
 fragile:
@@ -71,7 +71,7 @@ def freeze_ooxml(path) -> None:
 # ---------------------------------------------------------------------------
 # Brand imagery (deterministic, stdlib-only, supersampled RGBA -> PNG).
 #
-# ``docuskills_mark_png`` mirrors the brand glyph in ``assets/hero.svg`` (the
+# ``branddocs_mark_png`` mirrors the brand glyph in ``assets/hero.svg`` (the
 # "Brand Profile" card): a navy rounded-square tile with a blue stroke, a filled
 # blue header bar and an outlined blue field below it. Every example template
 # embeds the SAME mark so the committed binaries match the project hero. Pixels
@@ -175,8 +175,8 @@ def _disc(buf, W, H, cx, cy, rad, color):
                 buf[i], buf[i + 1], buf[i + 2], buf[i + 3] = color
 
 
-def docuskills_mark_png(size: int = 256) -> bytes:
-    """The DocuSkills brand mark (the hero.svg 'Brand Profile' card glyph).
+def branddocs_mark_png(size: int = 256) -> bytes:
+    """The BrandDocs brand mark (the hero.svg 'Brand Profile' card glyph).
 
     A navy rounded-square tile, blue stroke, a filled blue header bar and an
     outlined blue field below - rendered to a transparent ``size``x``size`` PNG.
@@ -203,7 +203,7 @@ def docuskills_mark_png(size: int = 256) -> bytes:
     return _png_bytes(rgba, ow, oh)
 
 
-def docuskills_curve_png(width: int = 480, height: int = 200) -> bytes:
+def branddocs_curve_png(width: int = 480, height: int = 200) -> bytes:
     """A small rising 'growth curve' figure on a light brand card.
 
     A light rounded card, faint navy axes, a thick blue rising polyline and

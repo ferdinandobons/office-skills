@@ -34,7 +34,7 @@ from typing import Any, Optional
 # Pinned schema version (semver). Bump MINOR for additive, MAJOR for breaking.
 # ---------------------------------------------------------------------------
 SCHEMA_VERSION: str = "1.2.0"
-SCHEMA_ID: str = "https://docu-skills/schema/profile-1.json"
+SCHEMA_ID: str = "https://brand-docs/schema/profile-1.json"
 
 # The comprehension sub-block carries its own independent schema tag so the
 # model-facing contract can evolve without re-versioning the whole envelope.

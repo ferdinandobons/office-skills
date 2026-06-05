@@ -24,7 +24,7 @@ from brandkit.qa.gate import run_qa
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="docu-skills")
+    parser = argparse.ArgumentParser(prog="brand-docs")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("extract")

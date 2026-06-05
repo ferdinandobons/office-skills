@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Deterministic builder for the COMPLEX synthetic PPTX example template.
 
-Produces ``examples/templates/docuskills_template.pptx``: a 100% synthetic
-(made-up "DocuSkills Corp" brand, never proprietary) deck that stresses the
+Produces ``examples/templates/branddocs_template.pptx``: a 100% synthetic
+(made-up "BrandDocs Corp" brand, never proprietary) deck that stresses the
 brand-pptx extractor/generator across as many PowerPoint component types as
 python-pptx (plus a little raw lxml) can author from the default template:
 
@@ -24,14 +24,14 @@ python-pptx (plus a little raw lxml) can author from the default template:
   * A NATIVE chart (``graphicFrame``/``c:chart``) via ``shapes.add_chart`` with
     a small clustered-bar dataset (the embedded chart workbook is part of the
     package, exercising the relationship/parts walker).
-  * A PICTURE: the shared, deterministic SQUARE DocuSkills brand mark PNG from
-    ``_brandlib.docuskills_mark_png`` (the ``assets/hero.svg`` "Brand Profile"
+  * A PICTURE: the shared, deterministic SQUARE BrandDocs brand mark PNG from
+    ``_brandlib.branddocs_mark_png`` (the ``assets/hero.svg`` "Brand Profile"
     glyph: a navy rounded tile with a blue stroke, a filled blue header bar and
     an outlined blue field below) - no external / proprietary asset on disk -
     placed both as a free ``add_picture`` shape and as a "logo" mark on the
     cover. The mark is SQUARE, so it is embedded with square EMU extents
     (``width == height``) to keep ``noChangeAspect`` drawings undistorted.
-  * A logo-like GROUPED-SHAPE mark + auto-shapes tinted with the synthetic DocuSkills
+  * A logo-like GROUPED-SHAPE mark + auto-shapes tinted with the synthetic BrandDocs
     theme colors (approximating SmartArt - see NOTE below).
   * Flat, borderless brand BANDS (``_add_band``) - pure decoration carrying no
     text - on the otherwise-bare cover / agenda / closing / demo slides.
@@ -45,7 +45,7 @@ NOTE - what is APPROXIMATED / SKIPPED (python-pptx limits, by design):
   * New custom slide masters / layouts cannot be created from scratch by
     python-pptx; this deck REUSES the default template's master + layouts (the
     task allows exactly this). Theme COLORS/FONTS are the ones that ship with
-    the default template; a DocuSkills palette is applied at the shape level.
+    the default template; a BrandDocs palette is applied at the shape level.
 
 Reproducibility: no randomness, no wall-clock. The core-properties timestamps
 are pinned to a fixed instant and the embedded PNG bytes are computed
@@ -53,7 +53,7 @@ deterministically by the shared ``_brandlib`` helper, so re-running the builder
 yields a byte-identical file (CI-friendly).
 
 Run:
-    PYTHONPATH=scripts .venv/bin/python examples/builders/build_docuskills_pptx.py
+    PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_pptx.py
 """
 from __future__ import annotations
 
@@ -66,22 +66,22 @@ from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 
-from _brandlib import docuskills_mark_png, freeze_ooxml
+from _brandlib import branddocs_mark_png, freeze_ooxml
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.util import Emu, Pt
 
-OUT = Path(__file__).resolve().parents[1] / "templates" / "docuskills_template.pptx"
+OUT = Path(__file__).resolve().parents[1] / "templates" / "branddocs_template.pptx"
 
 # ---------------------------------------------------------------------------
-# Synthetic "DocuSkills Corp" brand palette (made-up; never proprietary).
+# Synthetic "BrandDocs Corp" brand palette (made-up; never proprietary).
 # ---------------------------------------------------------------------------
-DOCU_NAVY = RGBColor(0x16, 0x21, 0x3F)
-DOCU_TEAL = RGBColor(0x2B, 0x7C, 0xD3)
-DOCU_AMBER = RGBColor(0xE0, 0x74, 0x2B)
-DOCU_LIGHT = RGBColor(0xEA, 0xF1, 0xFF)
-DOCU_SLATE = RGBColor(0x57, 0x78, 0xB0)
+BRAND_NAVY = RGBColor(0x16, 0x21, 0x3F)
+BRAND_TEAL = RGBColor(0x2B, 0x7C, 0xD3)
+BRAND_AMBER = RGBColor(0xE0, 0x74, 0x2B)
+BRAND_LIGHT = RGBColor(0xEA, 0xF1, 0xFF)
+BRAND_SLATE = RGBColor(0x57, 0x78, 0xB0)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
 # Default-template layout indices (verified against python-pptx 1.x default).
@@ -120,7 +120,7 @@ def _set_text(placeholder, text: str, *, size=None, bold=None, color=None) -> No
         run.font.color.rgb = color
 
 
-def _bullets(shape, items, *, size=18, color=DOCU_NAVY) -> None:
+def _bullets(shape, items, *, size=18, color=BRAND_NAVY) -> None:
     """Fill a shape's text frame with one bullet paragraph per (text, level)."""
     text_frame = shape.text_frame
     text_frame.clear()
@@ -169,25 +169,25 @@ def _add_cover(prs, png_path: Path):
     sw = prs.slide_width
     # Brand bands: a navy header band + a thin amber accent under it (decoration
     # only, no text -> classification unaffected). (P2)
-    _add_band(slide, Emu(0), Emu(0), sw, Emu(228600), DOCU_NAVY)
-    _add_band(slide, Emu(0), Emu(228600), sw, Emu(45720), DOCU_AMBER)
+    _add_band(slide, Emu(0), Emu(0), sw, Emu(228600), BRAND_NAVY)
+    _add_band(slide, Emu(0), Emu(228600), sw, Emu(45720), BRAND_AMBER)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
     # Keep ALL 5 placeholders filled (cover_anchors >= 5); nudge the title/subtitle
     # up into a tidier stack below the header band. (P7)
-    _set_text(ph[0], "DocuSkills Corp Quarterly Business Review", size=40, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "BrandDocs Corp Quarterly Business Review", size=40, bold=True, color=BRAND_NAVY)
     ph[0].top = Emu(2057400)
-    _set_text(ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=DOCU_TEAL)
+    _set_text(ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=BRAND_TEAL)
     ph[1].top = Emu(3429000)
     if 10 in ph:  # DATE placeholder
-        _set_text(ph[10], "January 15, 2026", size=12, color=DOCU_SLATE)
+        _set_text(ph[10], "January 15, 2026", size=12, color=BRAND_SLATE)
     if 11 in ph:  # FOOTER placeholder
-        _set_text(ph[11], "DocuSkills Corp - Confidential (synthetic sample)", size=12, color=DOCU_SLATE)
+        _set_text(ph[11], "BrandDocs Corp - Confidential (synthetic sample)", size=12, color=BRAND_SLATE)
     if 12 in ph:  # SLIDE_NUMBER placeholder
-        _set_text(ph[12], "1", size=12, color=DOCU_SLATE)
+        _set_text(ph[12], "1", size=12, color=BRAND_SLATE)
     # Thin amber rule under the title. (P7)
-    _add_band(slide, Emu(685800), Emu(3200400), Emu(2286000), Emu(45720), DOCU_AMBER)
-    # Logo picture in the corner (the shared SQUARE DocuSkills brand mark). The
-    # mark from ``docuskills_mark_png`` is square, so pass EQUAL width/height to
+    _add_band(slide, Emu(685800), Emu(3200400), Emu(2286000), Emu(45720), BRAND_AMBER)
+    # Logo picture in the corner (the shared SQUARE BrandDocs brand mark). The
+    # mark from ``branddocs_mark_png`` is square, so pass EQUAL width/height to
     # keep it undistorted (the <p:pic> carries noChangeAspect=1).
     slide.shapes.add_picture(
         str(png_path), Emu(457200), Emu(457200), width=Emu(914400), height=Emu(914400)
@@ -213,8 +213,8 @@ def _add_agenda(prs, section_names):
     ph[1].left, ph[1].top, ph[1].width, ph[1].height = (
         Emu(685800), Emu(3429000), Emu(7772400), Emu(2286000))
     # Left amber accent bar (decoration only, no text). (P2)
-    _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), DOCU_AMBER)
-    _set_text(ph[0], "Agenda", size=36, bold=True, color=DOCU_NAVY)
+    _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), BRAND_AMBER)
+    _set_text(ph[0], "Agenda", size=36, bold=True, color=BRAND_NAVY)
     # Anchor the body to the TOP of its frame so the list sits right below the
     # title instead of dropping to the bottom of the tall body box. (residual fix)
     ph[1].text_frame.vertical_anchor = MSO_ANCHOR.TOP
@@ -227,11 +227,11 @@ def _add_content_text(prs):
     layout = prs.slide_layouts[LO_TITLE_CONTENT]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Executive Summary", size=32, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "Executive Summary", size=32, bold=True, color=BRAND_NAVY)
     _bullets(
         ph[1],
         [
-            ("DocuSkills Corp grew net revenue 18% YoY across all three reported regions.", 0),
+            ("BrandDocs Corp grew net revenue 18% YoY across all three reported regions.", 0),
             ("Gross margin expanded 230 bps on supply-chain efficiencies.", 0),
             ("North region led growth; East rebounded after Q1 softness.", 1),
             ("FY2026 outlook raised on a stronger services pipeline.", 0),
@@ -246,12 +246,12 @@ def _add_content_table(prs):
     """Content-table slide: title + a NATIVE table (graphicFrame/a:tbl).
 
     A 5-row x 5-col table with a styled header band, body rows tinted with the
-    DocuSkills palette, and a totals row - exercises the table extractor path.
+    BrandDocs palette, and a totals row - exercises the table extractor path.
     """
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=BRAND_NAVY)
 
     rows, cols = 5, 5
     # Table spans 2.0-5.0in vertically: top=2.0in, height=3.0in, leaving a clean
@@ -271,7 +271,7 @@ def _add_content_table(prs):
         cell = table.cell(0, c)
         cell.text = label
         cell.fill.solid()
-        cell.fill.fore_color.rgb = DOCU_NAVY
+        cell.fill.fore_color.rgb = BRAND_NAVY
         run = cell.text_frame.paragraphs[0].runs[0]
         run.font.bold = True
         run.font.size = Pt(16)
@@ -281,15 +281,15 @@ def _add_content_table(prs):
             cell = table.cell(r, c)
             cell.text = val
             cell.fill.solid()
-            cell.fill.fore_color.rgb = DOCU_LIGHT if r % 2 else WHITE
+            cell.fill.fore_color.rgb = BRAND_LIGHT if r % 2 else WHITE
             run = cell.text_frame.paragraphs[0].runs[0]
             run.font.size = Pt(14)
-            run.font.color.rgb = DOCU_NAVY
+            run.font.color.rgb = BRAND_NAVY
     for c, val in enumerate(totals):
         cell = table.cell(rows - 1, c)
         cell.text = val
         cell.fill.solid()
-        cell.fill.fore_color.rgb = DOCU_TEAL
+        cell.fill.fore_color.rgb = BRAND_TEAL
         run = cell.text_frame.paragraphs[0].runs[0]
         run.font.bold = True
         run.font.size = Pt(15)
@@ -302,7 +302,7 @@ def _add_chart(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=BRAND_NAVY)
 
     chart_data = CategoryChartData()
     chart_data.categories = ["Q1", "Q2", "Q3", "Q4"]
@@ -316,25 +316,25 @@ def _add_chart(prs):
     )
     chart = gframe.chart
     chart.has_title = True
-    chart.chart_title.text_frame.text = "DocuSkills Corp - FY2026 Revenue"
+    chart.chart_title.text_frame.text = "BrandDocs Corp - FY2026 Revenue"
     # Brand the title font. (P3)
     title_font = chart.chart_title.text_frame.paragraphs[0].font
     title_font.size = Pt(16)
     title_font.bold = True
-    title_font.color.rgb = DOCU_NAVY
+    title_font.color.rgb = BRAND_NAVY
     chart.has_legend = True
     chart.legend.position = XL_LEGEND_POSITION.BOTTOM
     chart.legend.include_in_layout = False
     # Brand the 3 series in navy/teal/amber (stays a native 3-series chart). (P3)
-    for ser, col in zip(chart.plots[0].series, (DOCU_NAVY, DOCU_TEAL, DOCU_AMBER)):
+    for ser, col in zip(chart.plots[0].series, (BRAND_NAVY, BRAND_TEAL, BRAND_AMBER)):
         ser.format.fill.solid()
         ser.format.fill.fore_color.rgb = col
     # Soften the value-axis gridlines and brand the axis tick labels. (P3)
     value_axis = chart.value_axis
     value_axis.has_major_gridlines = True
-    value_axis.major_gridlines.format.line.color.rgb = DOCU_LIGHT
-    value_axis.tick_labels.font.color.rgb = DOCU_NAVY
-    chart.category_axis.tick_labels.font.color.rgb = DOCU_NAVY
+    value_axis.major_gridlines.format.line.color.rgb = BRAND_LIGHT
+    value_axis.tick_labels.font.color.rgb = BRAND_NAVY
+    chart.category_axis.tick_labels.font.color.rgb = BRAND_NAVY
     return slide
 
 
@@ -372,7 +372,7 @@ def _add_picture_slide(prs, png_path: Path):
         )
     # Reposition the TITLE and caption BODY into a tidy stack below the picture
     # box (bottom ~3.5in). All three placeholders stay present/filled. (P12)
-    _set_text(ph[0], "The DocuSkills Brand Mark", size=28, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "The BrandDocs Brand Mark", size=28, bold=True, color=BRAND_NAVY)
     ph[0].top = Emu(3429000)
     if 2 in ph:
         ph[2].top = Emu(4114800)
@@ -395,17 +395,17 @@ def _add_smartart_approx(prs):
 
     python-pptx CANNOT author SmartArt, so this APPROXIMATES a 3-step process
     diagram with grouped rounded rectangles connected by arrows, tinted with the
-    DocuSkills palette. Documented as an approximation in the module docstring.
+    BrandDocs palette. Documented as an approximation in the module docstring.
     """
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Our Approach (SmartArt-style process)", size=28, bold=True, color=DOCU_NAVY)
+    _set_text(ph[0], "Our Approach (SmartArt-style process)", size=28, bold=True, color=BRAND_NAVY)
 
     steps = [
-        ("Discover", DOCU_NAVY, "Validate the opportunity"),
-        ("Build", DOCU_TEAL, "Ship the MVP"),
-        ("Scale", DOCU_AMBER, "Grow to new regions"),
+        ("Discover", BRAND_NAVY, "Validate the opportunity"),
+        ("Build", BRAND_TEAL, "Ship the MVP"),
+        ("Scale", BRAND_AMBER, "Grow to new regions"),
     ]
     box_w, box_h = Emu(2286000), Emu(1143000)
     top = Emu(2743200)
@@ -417,7 +417,7 @@ def _add_smartart_approx(prs):
         box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, top, box_w, box_h)
         box.fill.solid()
         box.fill.fore_color.rgb = color
-        box.line.color.rgb = DOCU_SLATE
+        box.line.color.rgb = BRAND_SLATE
         box.line.width = Pt(1.5)       # crisper outline (P9)
         box.shadow.inherit = False     # flat, no default shadow (P9)
         tf = box.text_frame
@@ -434,7 +434,7 @@ def _add_smartart_approx(prs):
             conn = slide.shapes.add_connector(
                 MSO_CONNECTOR.STRAIGHT, prev_right, Emu(centers_y), x, Emu(centers_y)
             )
-            conn.line.color.rgb = DOCU_SLATE
+            conn.line.color.rgb = BRAND_SLATE
             conn.line.width = Pt(2.5)
         # Per-box sub-label as a separate borderless textbox below the box (this is
         # a structural slide, not the demo slide, so authored text is fine). (P9)
@@ -446,7 +446,7 @@ def _add_smartart_approx(prs):
         cp.text = sub
         crun = cp.runs[0]
         crun.font.size = Pt(12)
-        crun.font.color.rgb = DOCU_SLATE
+        crun.font.color.rgb = BRAND_SLATE
         prev_right = int(x) + int(box_w)
         x = Emu(int(x) + int(box_w) + int(gap))
     return slide
@@ -465,9 +465,9 @@ def _add_demo_slide(prs):
     sw, sh = prs.slide_width, prs.slide_height
     # Frame the demo slide with NON-TEXT bands only (decoration carrying no text),
     # so _slide_is_demo still sees the title prompt as the slide's ONLY text. (P5)
-    _add_band(slide, Emu(0), Emu(0), sw, Emu(228600), DOCU_NAVY)
-    _add_band(slide, Emu(0), Emu(228600), sw, Emu(45720), DOCU_AMBER)
-    _add_band(slide, Emu(0), Emu(int(sh) - 228600), sw, Emu(228600), DOCU_NAVY)
+    _add_band(slide, Emu(0), Emu(0), sw, Emu(228600), BRAND_NAVY)
+    _add_band(slide, Emu(0), Emu(228600), sw, Emu(45720), BRAND_AMBER)
+    _add_band(slide, Emu(0), Emu(int(sh) - 228600), sw, Emu(228600), BRAND_NAVY)
     title = slide.placeholders[0]
     # Re-read the live prompt so this stays correct if the template changes.
     layout_title = layout.placeholders[0]
@@ -488,15 +488,15 @@ def _add_closing(prs):
     ph[1].left, ph[1].top, ph[1].width, ph[1].height = (
         Emu(685800), Emu(3429000), Emu(7772400), Emu(2286000))
     # Left amber accent bar (decoration only, no text). (P2)
-    _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), DOCU_AMBER)
-    _set_text(ph[0], "Thank You", size=40, bold=True, color=DOCU_NAVY)
+    _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), BRAND_AMBER)
+    _set_text(ph[0], "Thank You", size=40, bold=True, color=BRAND_NAVY)
     # Anchor the body to the TOP of its frame so the lines sit right below the
     # title instead of dropping to the bottom of the tall body box. (residual fix)
     ph[1].text_frame.vertical_anchor = MSO_ANCHOR.TOP
     _bullets(
         ph[1],
-        [("Questions? hello@docuskills.example", 0),
-         ("DocuSkills Corp - synthetic sample deck.", 0)],
+        [("Questions? hello@branddocs.example", 0),
+         ("BrandDocs Corp - synthetic sample deck.", 0)],
         size=18,
     )
     return slide
@@ -558,16 +558,16 @@ def _inject_sections(prs, sections) -> None:
 # ---------------------------------------------------------------------------
 def build(out: Path = OUT) -> Path:
     out = Path(out)
-    # The shared SQUARE DocuSkills brand mark (the assets/hero.svg glyph). Bytes
+    # The shared SQUARE BrandDocs brand mark (the assets/hero.svg glyph). Bytes
     # are computed deterministically by _brandlib, so every example template
     # embeds the SAME mark and re-runs stay byte-identical.
-    png_bytes = docuskills_mark_png(256)
+    png_bytes = branddocs_mark_png(256)
 
     # Materialize the mark PNG to a temp file (python-pptx wants a path or a
     # stream; we use a BytesIO-backed temp via NamedTemporaryFile-free path).
     import tempfile
 
-    tmp_png = Path(tempfile.gettempdir()) / "docuskills_template_mark.png"
+    tmp_png = Path(tempfile.gettempdir()) / "branddocs_template_mark.png"
     tmp_png.write_bytes(png_bytes)
 
     prs = Presentation()  # default template (master + 11 layouts + theme)
@@ -603,12 +603,12 @@ def build(out: Path = OUT) -> Path:
     # --- Pin core-properties timestamps for byte-reproducibility. -------------
     fixed = datetime(2026, 1, 15, 0, 0, 0, tzinfo=timezone.utc)
     cp = prs.core_properties
-    cp.author = "DocuSkills Corp (synthetic fixture)"
-    cp.title = "DocuSkills Corp Quarterly Business Review"
+    cp.author = "BrandDocs Corp (synthetic fixture)"
+    cp.title = "BrandDocs Corp Quarterly Business Review"
     cp.subject = "Synthetic test fixture - no proprietary content"
     cp.created = fixed
     cp.modified = fixed
-    cp.last_modified_by = "DocuSkills Corp (synthetic fixture)"
+    cp.last_modified_by = "BrandDocs Corp (synthetic fixture)"
     cp.revision = 1
 
     out.parent.mkdir(parents=True, exist_ok=True)

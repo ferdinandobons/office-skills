@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Deterministic builder for the COMPLEX synthetic DOCX example template.
 
-Produces ``examples/templates/docuskills_template.docx``: a 100% synthetic
-(``DocuSkills Corp``, never proprietary) Word template that stresses the brand-docx
+Produces ``examples/templates/branddocs_template.docx``: a 100% synthetic
+(``BrandDocs Corp``, never proprietary) Word template that stresses the brand-docx
 extractor / generator across as many Word component types as can be authored
 without Microsoft Word - python-docx for the bulk, and raw lxml for the many
 parts python-docx cannot reach (block-level ``w:sdt`` content controls, real
@@ -30,10 +30,10 @@ Components authored (each is a real OOXML structure, not a text approximation):
 
   NUMBERING (real ``word/numbering.xml``, referenced via ``w:numPr`` from named
     paragraph styles, not direct formatting):
-    * a 2-level BULLET list  -> styles "DocuSkills Bullet L1" / "DocuSkills Bullet L2";
-    * a 1-level NUMBERED list -> style "DocuSkills Number L1".
+    * a 2-level BULLET list  -> styles "BrandDocs Bullet L1" / "BrandDocs Bullet L2";
+    * a 1-level NUMBERED list -> style "BrandDocs Number L1".
 
-  TABLE: a custom ``w:type="table"`` style "DocuSkills Table" (header-row shading +
+  TABLE: a custom ``w:type="table"`` style "BrandDocs Table" (header-row shading +
     row banding via ``w:tblStylePr`` conditional formatting) applied to a sample
     table, with a real ``SEQ Table`` caption ("Table 1. ...").
 
@@ -41,9 +41,9 @@ Components authored (each is a real OOXML structure, not a text approximation):
     Figure 1 is the shared square brand mark (the hero.svg glyph, image1.png) and
     Figure 2 is a real rising growth curve (image2.png, a distinct media part).
 
-  CALLOUT: a paragraph style "DocuSkills Callout" with shading + a box border.
+  CALLOUT: a paragraph style "BrandDocs Callout" with shading + a box border.
 
-  HEADER / FOOTER: the shared DocuSkills brand mark in the default header, and a
+  HEADER / FOOTER: the shared BrandDocs brand mark in the default header, and a
     ``PAGE`` field in the default footer.
 
   SECTIONS: a PORTRAIT first section and a LANDSCAPE second section (distinct
@@ -58,7 +58,7 @@ The output is byte-reproducible: every id / image byte / part is fixed, no
 random or timestamp, so re-running yields an identical file.
 
 Run:
-    PYTHONPATH=scripts .venv/bin/python examples/builders/build_docuskills_docx.py
+    PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_docx.py
 """
 from __future__ import annotations
 
@@ -70,9 +70,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Twips
 from lxml import etree
 
-from _brandlib import docuskills_curve_png, docuskills_mark_png, freeze_ooxml
+from _brandlib import branddocs_curve_png, branddocs_mark_png, freeze_ooxml
 
-OUT = Path(__file__).resolve().parents[1] / "templates" / "docuskills_template.docx"
+OUT = Path(__file__).resolve().parents[1] / "templates" / "branddocs_template.docx"
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -80,12 +80,12 @@ WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 
-# Synthetic DocuSkills Corp brand palette (made-up; never proprietary).
-DOCU_NAVY = "16213F"
-DOCU_TEAL = "2B7CD3"
-DOCU_AMBER = "E0742B"
-DOCU_LIGHT = "EAF1FF"
-DOCU_BAND = "DCE7FF"
+# Synthetic BrandDocs Corp brand palette (made-up; never proprietary).
+BRAND_NAVY = "16213F"
+BRAND_TEAL = "2B7CD3"
+BRAND_AMBER = "E0742B"
+BRAND_LIGHT = "EAF1FF"
+BRAND_BAND = "DCE7FF"
 WHITE = "FFFFFF"
 
 
@@ -216,9 +216,9 @@ def _add_list_style(styles, style_id, name, num_id, ilvl=0):
 
 def _add_table_style(styles):
     """A custom ``w:type='table'`` style: header-row shading + row banding."""
-    st = _sub(styles, "style", type="table", styleId="DocuSkillsTable")
+    st = _sub(styles, "style", type="table", styleId="BrandDocsTable")
     st.set(_w("customStyle"), "1")
-    _sub(st, "name", val="DocuSkills Table")
+    _sub(st, "name", val="BrandDocs Table")
     _sub(st, "basedOn", val="TableNormal")
     _sub(st, "uiPriority", val="99")
     # Base table: thin navy grid + banded-row size hint.
@@ -226,21 +226,21 @@ def _add_table_style(styles):
     _sub(tblPr, "tblStyleRowBandSize", val="1")
     borders = _sub(tblPr, "tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        _sub(borders, side, val="single", sz="4", space="0", color=DOCU_NAVY)
+        _sub(borders, side, val="single", sz="4", space="0", color=BRAND_NAVY)
     # Default cell run color.
     rPr = _sub(st, "rPr")
-    _sub(rPr, "color", val=DOCU_NAVY)
+    _sub(rPr, "color", val=BRAND_NAVY)
     # First-row (header) conditional formatting: navy fill + white bold text.
     fr = _sub(st, "tblStylePr", type="firstRow")
     fr_rpr = _sub(fr, "rPr")
     _sub(fr_rpr, "b")
     _sub(fr_rpr, "color", val=WHITE)
     fr_tcpr = _sub(fr, "tcPr")
-    _sub(fr_tcpr, "shd", val="clear", color="auto", fill=DOCU_NAVY)
+    _sub(fr_tcpr, "shd", val="clear", color="auto", fill=BRAND_NAVY)
     # Banded rows: light-blue fill on every other row.
     band = _sub(st, "tblStylePr", type="band1Horz")
     band_tcpr = _sub(band, "tcPr")
-    _sub(band_tcpr, "shd", val="clear", color="auto", fill=DOCU_BAND)
+    _sub(band_tcpr, "shd", val="clear", color="auto", fill=BRAND_BAND)
     return st
 
 
@@ -285,7 +285,7 @@ def _ensure_toc_styles(styles):
         _sub(st, "qFormat")
         rPr = _sub(st, "rPr")
         _sub(rPr, "i")
-        _sub(rPr, "color", val=DOCU_TEAL)
+        _sub(rPr, "color", val=BRAND_TEAL)
         _sub(rPr, "sz", val="18")
     if "FootnoteText" not in have:
         st = _sub(styles, "style", type="paragraph", styleId="FootnoteText")
@@ -305,19 +305,19 @@ def _build_styles(doc):
     _ensure_list_paragraph_style(styles)
     _ensure_toc_styles(styles)
     # Branded paragraph styles.
-    _add_paragraph_style(styles, "DocuSkillsCoverTitle", "DocuSkills Cover Title",
-                         color=DOCU_NAVY, bold=True, size_pt=28)
-    _add_paragraph_style(styles, "DocuSkillsCoverSubtitle", "DocuSkills Cover Subtitle",
-                         color=DOCU_TEAL, size_pt=14)
-    _add_paragraph_style(styles, "DocuSkillsCallout", "DocuSkills Callout",
-                         color=DOCU_NAVY, shading=DOCU_LIGHT, box_border=DOCU_TEAL,
-                         left_accent=DOCU_AMBER)
+    _add_paragraph_style(styles, "BrandDocsCoverTitle", "BrandDocs Cover Title",
+                         color=BRAND_NAVY, bold=True, size_pt=28)
+    _add_paragraph_style(styles, "BrandDocsCoverSubtitle", "BrandDocs Cover Subtitle",
+                         color=BRAND_TEAL, size_pt=14)
+    _add_paragraph_style(styles, "BrandDocsCallout", "BrandDocs Callout",
+                         color=BRAND_NAVY, shading=BRAND_LIGHT, box_border=BRAND_TEAL,
+                         left_accent=BRAND_AMBER)
     # List styles -> reference w:num 1 (bullet L1), 2 (bullet L2), 3 (number L1).
     # BUG-LIST-ILVL: the L2 bullet pins w:ilvl=1 so it binds to level 1 of
     # abstractNum 0 (a distinct ``list.bullet.2`` role, not a dedup of L1).
-    _add_list_style(styles, "DocuSkillsBulletL1", "DocuSkills Bullet L1", num_id=1, ilvl=0)
-    _add_list_style(styles, "DocuSkillsBulletL2", "DocuSkills Bullet L2", num_id=2, ilvl=1)
-    _add_list_style(styles, "DocuSkillsNumberL1", "DocuSkills Number L1", num_id=3, ilvl=0)
+    _add_list_style(styles, "BrandDocsBulletL1", "BrandDocs Bullet L1", num_id=1, ilvl=0)
+    _add_list_style(styles, "BrandDocsBulletL2", "BrandDocs Bullet L2", num_id=2, ilvl=1)
+    _add_list_style(styles, "BrandDocsNumberL1", "BrandDocs Number L1", num_id=3, ilvl=0)
     # Branded table style.
     _add_table_style(styles)
 
@@ -328,7 +328,7 @@ def _build_styles(doc):
 # part is built with lxml and attached to the package.
 # ---------------------------------------------------------------------------
 def _populate_numbering(root) -> None:
-    """Fill an existing ``w:numbering`` element with DocuSkills abstractNum/num defs.
+    """Fill an existing ``w:numbering`` element with BrandDocs abstractNum/num defs.
 
     The python-docx default template already ships a (empty) ``word/numbering.xml``
     part, already related from ``document.xml``. We MUST reuse that part - adding a
@@ -412,7 +412,7 @@ def _build_footnotes_xml() -> bytes:
     _sub(ref_run, "footnoteRef")
     txt = _sub(p, "r")
     t = _sub(txt, "t")
-    t.text = " DocuSkills Corp is a fictional company used only for testing."
+    t.text = " BrandDocs Corp is a fictional company used only for testing."
     t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
@@ -450,11 +450,11 @@ def _cover_title_sdt():
     sdt = _el("sdt")
     sdtPr = _sub(sdt, "sdtPr")
     rpr = _sub(sdtPr, "rPr")
-    _sub(rpr, "color", val=DOCU_NAVY)
+    _sub(rpr, "color", val=BRAND_NAVY)
     _sub(rpr, "sz", val="56")
     _sub(rpr, "b")
     _sub(sdtPr, "alias", val="Title")
-    _sub(sdtPr, "tag", val="docuskills_title")
+    _sub(sdtPr, "tag", val="branddocs_title")
     _sub(sdtPr, "id", val="101")
     placeholder = _sub(sdtPr, "placeholder")
     _sub(placeholder, "docPart", val="DefaultPlaceholder_Title")
@@ -463,14 +463,14 @@ def _cover_title_sdt():
     sdtContent = _sub(sdt, "sdtContent")
     p = _sub(sdtContent, "p")
     pPr = _sub(p, "pPr")
-    _sub(pPr, "pStyle", val="DocuSkillsCoverTitle")
+    _sub(pPr, "pStyle", val="BrandDocsCoverTitle")
     r = _sub(p, "r")
     rpr2 = _sub(r, "rPr")
-    _sub(rpr2, "color", val=DOCU_NAVY)
+    _sub(rpr2, "color", val=BRAND_NAVY)
     _sub(rpr2, "sz", val="56")
     _sub(rpr2, "b")
     t = _sub(r, "t")
-    t.text = "DocuSkills Brand Operations Review"
+    t.text = "BrandDocs Brand Operations Review"
     return sdt
 
 
@@ -484,9 +484,9 @@ def _cover_band(doc):
     """
     p = doc.add_paragraph("")
     pPr = p._p.get_or_add_pPr()
-    _sub(pPr, "shd", val="clear", color="auto", fill=DOCU_NAVY)
+    _sub(pPr, "shd", val="clear", color="auto", fill=BRAND_NAVY)
     pbdr = _sub(pPr, "pBdr")
-    _sub(pbdr, "bottom", val="single", sz="24", space="2", color=DOCU_AMBER)
+    _sub(pbdr, "bottom", val="single", sz="24", space="2", color=BRAND_AMBER)
     _sub(pPr, "spacing", before="60", after="180")
     return p
 
@@ -502,8 +502,8 @@ def _build_cover(doc):
     # demo values are realistic synthetic content (CR-COVER-VALUES); the SDT
     # title above now carries a realistic synthetic title (CR-COVER-TITLE) while
     # still classifying as the title slot via its ``w:alias='Title'``.
-    sub_p = _p(doc, "Annual Brand Operations Review - DocuSkills Corp (synthetic)",
-               "DocuSkillsCoverSubtitle")
+    sub_p = _p(doc, "Annual Brand Operations Review - BrandDocs Corp (synthetic)",
+               "BrandDocsCoverSubtitle")
     docid_p = doc.add_paragraph("Document ID: DSK-BR-2026-014")
     date_p = doc.add_paragraph("June 5, 2026")
     # A navy brand band sits BELOW the date slot (empty text, not an anchor).
@@ -585,8 +585,8 @@ def _build_index_front_matter(doc):
     def _tot_entries(d):
         # Cached entries mirror the two real SEQ Table captions in the body and
         # the landscape appendix (does NOT change the fields count).
-        _toc_entry(d, "Table 1. DocuSkills FY2026 quarterly revenue", 5, style="TableofFigures")
-        _toc_entry(d, "Table 2. DocuSkills program rollout matrix", 7, style="TableofFigures")
+        _toc_entry(d, "Table 1. BrandDocs FY2026 quarterly revenue", 5, style="TableofFigures")
+        _toc_entry(d, "Table 2. BrandDocs program rollout matrix", 7, style="TableofFigures")
 
     _complex_field(doc, 'TOC \\h \\z \\c "Table" ', _tot_entries)
 
@@ -594,8 +594,8 @@ def _build_index_front_matter(doc):
     _toc_heading(doc, "Table of Figures")
 
     def _tof_entries(d):
-        _toc_entry(d, "Figure 1. DocuSkills Corp logo mark", 2, style="TableofFigures")
-        _toc_entry(d, "Figure 2. DocuSkills growth curve", 6, style="TableofFigures")
+        _toc_entry(d, "Figure 1. BrandDocs Corp logo mark", 2, style="TableofFigures")
+        _toc_entry(d, "Figure 2. BrandDocs growth curve", 6, style="TableofFigures")
 
     _complex_field(doc, 'TOC \\h \\z \\c "Figure" ', _tof_entries)
 
@@ -624,25 +624,25 @@ def _build_lists(doc):
     # children) + a numbered rollout sequence. Same style ids and structure as
     # before, now exercising the L2 ilvl=1 binding (BUG-LIST-ILVL) properly.
     _p(doc, "Brand operating principles", "Heading1")
-    _p(doc, "Consistency before customization", "DocuSkillsBulletL1")
-    _p(doc, "One palette: navy, teal, amber", "DocuSkillsBulletL2")
-    _p(doc, "Type scale fixed across all templates", "DocuSkillsBulletL2")
-    _p(doc, "Templates are contracts, not suggestions", "DocuSkillsBulletL1")
-    _p(doc, "Cover, contents, and indices are preserved", "DocuSkillsBulletL2")
-    _p(doc, "Body content is regenerated per request", "DocuSkillsBulletL2")
+    _p(doc, "Consistency before customization", "BrandDocsBulletL1")
+    _p(doc, "One palette: navy, teal, amber", "BrandDocsBulletL2")
+    _p(doc, "Type scale fixed across all templates", "BrandDocsBulletL2")
+    _p(doc, "Templates are contracts, not suggestions", "BrandDocsBulletL1")
+    _p(doc, "Cover, contents, and indices are preserved", "BrandDocsBulletL2")
+    _p(doc, "Body content is regenerated per request", "BrandDocsBulletL2")
     _p(doc, "Rollout sequence", "Heading2")
-    _p(doc, "Extract the template surface and brand profile", "DocuSkillsNumberL1")
-    _p(doc, "Review the captured slots and index front matter", "DocuSkillsNumberL1")
-    _p(doc, "Generate the branded document", "DocuSkillsNumberL1")
+    _p(doc, "Extract the template surface and brand profile", "BrandDocsNumberL1")
+    _p(doc, "Review the captured slots and index front matter", "BrandDocsNumberL1")
+    _p(doc, "Generate the branded document", "BrandDocsNumberL1")
 
 
 def _build_table(doc):
     # CR-TABLE: header + four quarters of internally-consistent synthetic data.
     # BUG-TABLE-NUMFMT: one currency style ($X.XXM) and one percent style
     # (+X.X%) across every row, so the columns read as formatted figures.
-    _p(doc, "DocuSkills quarterly revenue", "Heading2")
+    _p(doc, "BrandDocs quarterly revenue", "Heading2")
     table = doc.add_table(rows=5, cols=4)
-    table.style = "DocuSkills Table"
+    table.style = "BrandDocs Table"
     # Tell Word which conditional formats to apply (first row + banding).
     tblPr = table._tbl.tblPr
     look = _sub(tblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
@@ -660,32 +660,32 @@ def _build_table(doc):
         for c, val in zip(table.rows[r].cells, row):
             c.text = val
     _seq_caption(doc, "Table", "Table",
-                 "DocuSkills FY2026 quarterly revenue by region (synthetic data).")
+                 "BrandDocs FY2026 quarterly revenue by region (synthetic data).")
 
 
 def _build_figure(doc, logo_rid, logo_cx, logo_cy):
-    _p(doc, "DocuSkills brand mark", "Heading2")
+    _p(doc, "BrandDocs brand mark", "Heading2")
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run()
-    run._r.append(_inline_drawing(logo_rid, logo_cx, logo_cy, "DocuSkillsLogoFigure", 100))
-    _seq_caption(doc, "Figure", "Figure", "DocuSkills Corp logo mark (synthetic).")
+    run._r.append(_inline_drawing(logo_rid, logo_cx, logo_cy, "BrandDocsLogoFigure", 100))
+    _seq_caption(doc, "Figure", "Figure", "BrandDocs Corp logo mark (synthetic).")
 
 
 def _build_callout(doc):
     # CR-CALLOUT: an on-brand synthetic note (not a meta tooling instruction).
     _p(
         doc,
-        "DocuSkills Corp is a synthetic, fictional company used to demonstrate an "
+        "BrandDocs Corp is a synthetic, fictional company used to demonstrate an "
         "on-brand internal brief. All figures, names, and regions in this template "
         "are illustrative.",
-        "DocuSkillsCallout",
+        "BrandDocsCallout",
     )
 
 
 def _build_footnote_paragraph(doc, footnote_id):
-    _p(doc, "DocuSkills footnote demo", "Heading2")
-    body = doc.add_paragraph("DocuSkills Corp")
+    _p(doc, "BrandDocs footnote demo", "Heading2")
+    body = doc.add_paragraph("BrandDocs Corp")
     run = body.add_run(" is a registered placeholder brand")
     # Append a footnoteReference run (id -> footnotes.xml).
     fr = _sub(body._p, "r")
@@ -702,14 +702,14 @@ def _build_demo_body(doc):
     # so demo_region.present stays True with realistic copy.
     _p(doc, "Overview", "Heading1")
     doc.add_paragraph(
-        "This brief summarizes how the DocuSkills Corp brand system is applied "
+        "This brief summarizes how the BrandDocs Corp brand system is applied "
         "across internal documents. It exists to show a complete, on-brand "
         "template; a generation run replaces this body with the requested content."
     )
     _p(doc, "Methodology", "Heading2")
     doc.add_paragraph(
         "Figures are drawn from a synthetic operations dataset maintained by the "
-        "DocuSkills brand office. Revenue, growth, and regional splits are "
+        "BrandDocs brand office. Revenue, growth, and regional splits are "
         "illustrative and should not be read as real performance data."
     )
 
@@ -763,7 +763,7 @@ def _build_header_footer(doc, logo_rid, cx, cy):
     hp.text = ""
     run = hp.add_run()
     # The header logo references the header part's OWN relationship to the image.
-    run._r.append(_inline_drawing(logo_rid, cx, cy, "DocuSkillsHeaderLogo", 200))
+    run._r.append(_inline_drawing(logo_rid, cx, cy, "BrandDocsHeaderLogo", 200))
 
     footer = section.footer
     footer.is_linked_to_previous = False
@@ -826,7 +826,7 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     # Swap page width/height for landscape (python-docx does not auto-swap).
     new_section.page_width = Twips(15840)   # 11"
     new_section.page_height = Twips(12240)  # 8.5"
-    _p(doc, "DocuSkills landscape appendix", "Heading1")
+    _p(doc, "BrandDocs landscape appendix", "Heading1")
     doc.add_paragraph(
         "This appendix sits in a landscape section. It carries a wide program "
         "rollout matrix and a second brand figure that the portrait body cannot "
@@ -837,7 +837,7 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     # reusing the same custom table style + tblLook (banding exercised again).
     _p(doc, "Program rollout matrix", "Heading2")
     wide = doc.add_table(rows=5, cols=7)
-    wide.style = "DocuSkills Table"
+    wide.style = "BrandDocs Table"
     wtblPr = wide._tbl.tblPr
     _sub(wtblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
          lastColumn="0", noHBand="0", noVBand="1")
@@ -857,7 +857,7 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     # margins), so the 7-column table fits the landscape usable width.
     _set_col_widths(wide, (2880, 2400, 1680, 1680, 1680, 1680, 1680))
     _seq_caption(doc, "Table", "Table",
-                 "DocuSkills FY2026 program rollout matrix (synthetic).")
+                 "BrandDocs FY2026 program rollout matrix (synthetic).")
 
     # PL-LANDSCAPE-CAPTION-SEQ / CR-FIG2-CURVE: a real SECOND inline figure so the
     # cached "Figure 2" in the Table of Figures corresponds to a rendered figure.
@@ -865,15 +865,15 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     # NOT a reuse of the logo - Figure 2 is a real rising growth curve, not the
     # brand mark. The curve PNG is ~12:5, so the inline extent matches that aspect.
     if curve_rid is not None:
-        _p(doc, "DocuSkills growth curve", "Heading2")
+        _p(doc, "BrandDocs growth curve", "Heading2")
         fp = doc.add_paragraph()
         fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
         frun = fp.add_run()
         frun._r.append(
-            _inline_drawing(curve_rid, fig_cx, fig_cy, "DocuSkillsGrowthFigure", 300)
+            _inline_drawing(curve_rid, fig_cx, fig_cy, "BrandDocsGrowthFigure", 300)
         )
         _seq_caption(doc, "Figure", "Figure",
-                     "DocuSkills Corp growth curve (synthetic illustration).")
+                     "BrandDocs Corp growth curve (synthetic illustration).")
     return new_section
 
 
@@ -909,11 +909,11 @@ def build(out: Path = OUT) -> Path:
 
     # 4) Shared brand-mark image (the hero.svg glyph): a SQUARE navy rounded tile
     # with the blue stroke + filled/outlined blue bars. The SAME mark every
-    # DocuSkills template embeds (CR-LOGO-MARK). Related to the document part (for
+    # BrandDocs template embeds (CR-LOGO-MARK). Related to the document part (for
     # Figure 1) and to the header part (for the header logo) independently. A
     # SECOND media part carries the real growth-curve figure (CR-FIG2-CURVE).
-    logo_blob = docuskills_mark_png(256)          # square brand mark (image1.png)
-    curve_blob = docuskills_curve_png(480, 200)   # ~12:5 growth curve (image2.png)
+    logo_blob = branddocs_mark_png(256)          # square brand mark (image1.png)
+    curve_blob = branddocs_curve_png(480, 200)   # ~12:5 growth curve (image2.png)
     doc_logo_rid = _relate_image_to(doc.part, logo_blob)
     doc_curve_rid = _relate_image_to(doc.part, curve_blob, partname="media/image2.png")
 
