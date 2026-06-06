@@ -135,7 +135,7 @@ important than producing a clean branded document.
 The most valuable next reliability improvements are:
 
 1. **Strict visual mode** - add a future `--qa strict` that fails when full render proof is unavailable or when L1/L2 checks are not clean.
-2. **Native PPTX object authoring** - generate real PowerPoint tables/charts instead of down-rendering them to text, while keeping component-survival warnings.
+2. **Native PPTX object authoring** - continue beyond native tables into real PowerPoint charts/images/SmartArt instead of down-rendering them to text, while keeping component-survival warnings.
 3. **Richer visual analysis** - add `PyMuPDF` as a PDF raster fallback/cross-check, then optional `numpy`/`opencv-python` or `scikit-image` for overlap, clipping, and large-empty-region detection.
 4. **Optional OCR** - detect visible stale placeholders, stale TOC caches, or demo text that OOXML text scans miss.
 5. **Skill eval set** - maintain template-based regression prompts for DOCX/PPTX/XLSX and compare outputs with and without the skill, measuring residual demo text, formula survival, component survival, page count, and visual warnings.

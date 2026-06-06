@@ -38,13 +38,13 @@ Design (off-brand-by-construction, §C3/M6/M7, plan §6 reconcile-not-rebuild):
     ``indent`` (the IR list level) survives the capacity split and is applied to the
     written paragraph.
 
-DEFERRED (feature milestone, NOT built here): native PPTX tables (``graphicFrame``/
-``a:tbl`` via ``shapes.add_table``), native charts (``c:chart`` via
-``shapes.add_chart``) and SmartArt. Those blocks are still flattened to body text,
-but each flattening now records a ``block_degraded`` WARNING (symmetric with the
-docx vertical) so a deck that loses a native object is visible in QA rather than
-silently down-rendered. A component-survival check (shell-vs-output native counts)
-backs the same guarantee from the QA side.
+Native PPTX tables (``graphicFrame``/``a:tbl`` via ``shapes.add_table``) are
+authored as real table objects. Charts (``c:chart`` via ``shapes.add_chart``),
+SmartArt, KPI and images are still flattened to body text, but each flattening
+records a ``block_degraded`` WARNING (symmetric with the docx vertical) so a deck
+that loses a native object is visible in QA rather than silently down-rendered. A
+component-survival check (shell-vs-output native counts) backs the same guarantee
+from the QA side.
 """
 from __future__ import annotations
 
@@ -87,6 +87,18 @@ class BodyLine:
 
     def __len__(self) -> int:  # capacity split measures display width by text length
         return len(self.text)
+
+
+@dataclass
+class SlideChunk:
+    """One generated content slide payload.
+
+    Text lines and native table blocks are kept separate so table blocks can be
+    authored as real PowerPoint tables instead of being flattened into body text.
+    """
+
+    lines: list[BodyLine]
+    table: Optional[ir.Table] = None
 
 
 def generate(
@@ -435,8 +447,8 @@ def _append_content_slides(prs, profile: dict, idoc, content_layout, sink: list)
     capacity = _body_capacity(profile)
     layout = content_layout or prs.slide_layouts[0]
     for section in _sections(idoc.blocks):
-        body_lines = _body_lines(section["body"], sink)
-        for page, chunk in enumerate(_split_lines(body_lines, capacity)):
+        chunks = _content_chunks(section["body"], capacity, sink)
+        for page, chunk in enumerate(chunks):
             slide = prs.slides.add_slide(layout)
             title = section["title"]
             if page:
@@ -444,8 +456,118 @@ def _append_content_slides(prs, profile: dict, idoc, content_layout, sink: list)
             if slide.shapes.title is not None:
                 slide.shapes.title.text = title
             body = _first_body_placeholder(slide)
-            if body is not None and chunk:
-                _write_body_lines(body, chunk)
+            if chunk.table is not None:
+                _clear_body_placeholder(body)
+                _add_native_table(slide, prs, chunk.table, body)
+            elif body is not None and chunk.lines:
+                _write_body_lines(body, chunk.lines)
+
+
+def _content_chunks(blocks: list, capacity: int, sink: list) -> list[SlideChunk]:
+    """Split a section into slide payloads while preserving native table blocks."""
+    chunks: list[SlideChunk] = []
+    pending: list = []
+
+    def flush_pending() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        lines = _body_lines(pending, sink)
+        for line_chunk in _split_lines(lines, capacity):
+            chunks.append(SlideChunk(lines=line_chunk))
+        pending = []
+
+    for block in blocks:
+        if isinstance(block, ir.Table):
+            flush_pending()
+            chunks.append(SlideChunk(lines=[], table=block))
+        else:
+            pending.append(block)
+    flush_pending()
+    return chunks or [SlideChunk(lines=[])]
+
+
+def _clear_body_placeholder(body) -> None:
+    if body is not None and getattr(body, "has_text_frame", False):
+        _set_placeholder_text(body, "")
+
+
+def _add_native_table(slide, prs, table: ir.Table, body_placeholder=None) -> None:
+    """Author an ``ir.Table`` as a real PowerPoint table shape.
+
+    Geometry is derived from the layout's body placeholder when available; this
+    keeps placement tied to the template affordance rather than to a fabricated
+    slide coordinate system. The table uses PowerPoint's native table object and
+    theme/default styling, avoiding brand-specific literal colors or fonts.
+    """
+    col_count = _table_column_count(table)
+    if col_count <= 0:
+        return
+    has_header = bool(table.columns)
+    row_count = len(table.rows) + (1 if has_header else 0)
+    if row_count <= 0:
+        return
+
+    left, top, width, height = _table_bounds(prs, body_placeholder)
+    caption = textutil.runs_to_text(table.caption or []) if table.caption else ""
+    caption_height = 300000 if caption else 0
+    gap = 90000 if caption else 0
+    usable_height = max(300000, height - caption_height - gap)
+    table_height = min(usable_height, max(360000, row_count * 360000))
+
+    gtable = slide.shapes.add_table(row_count, col_count, left, top, width, table_height)
+    ppt_table = gtable.table
+    row_offset = 0
+    if has_header:
+        for c_idx in range(col_count):
+            ppt_table.cell(0, c_idx).text = _table_header_text(table, c_idx)
+        row_offset = 1
+    for r_idx, row in enumerate(table.rows):
+        for c_idx in range(col_count):
+            ppt_table.cell(r_idx + row_offset, c_idx).text = _table_cell_text(row, c_idx)
+
+    if caption:
+        cap_top = top + table_height + gap
+        cap = slide.shapes.add_textbox(left, cap_top, width, caption_height)
+        cap.text_frame.text = caption
+
+
+def _table_column_count(table: ir.Table) -> int:
+    counts = [len(table.columns)]
+    counts.extend(len(row) for row in table.rows)
+    return max(counts or [0])
+
+
+def _table_header_text(table: ir.Table, index: int) -> str:
+    if index >= len(table.columns):
+        return ""
+    cell = table.columns[index]
+    return textutil.runs_to_text([cell]) if isinstance(cell, dict) else str(cell)
+
+
+def _table_cell_text(row: list, index: int) -> str:
+    if index >= len(row):
+        return ""
+    return textutil.runs_to_text(row[index].runs)
+
+
+def _table_bounds(prs, body_placeholder=None) -> tuple[int, int, int, int]:
+    if body_placeholder is not None:
+        left = int(getattr(body_placeholder, "left", 0) or 0)
+        top = int(getattr(body_placeholder, "top", 0) or 0)
+        width = int(getattr(body_placeholder, "width", 0) or 0)
+        height = int(getattr(body_placeholder, "height", 0) or 0)
+        if left >= 0 and top >= 0 and width > 0 and height > 0:
+            return left, top, width, height
+
+    slide_w = int(prs.slide_width)
+    slide_h = int(prs.slide_height)
+    return (
+        int(slide_w * 0.08),
+        int(slide_h * 0.24),
+        int(slide_w * 0.84),
+        int(slide_h * 0.62),
+    )
 
 
 def _write_body_lines(body, lines: list[BodyLine]) -> None:
@@ -667,11 +789,11 @@ def _body_lines(blocks: list, sink: list) -> list[BodyLine]:
     ``indent`` (level) so the layout supplies the bullet; quotes (with attribution),
     captions and callouts each become their own line(s).
 
-    DEFERRED (feature milestone): tables, charts, KPI, SmartArt and images are still
-    flattened to body text (a table to tab-joined rows, a chart/KPI/image to a short
-    stand-in) because the native PPTX writers are not built yet. Each such flattening
-    records a ``block_degraded`` WARNING on ``sink`` so the down-render is visible in
-    QA (symmetric with the docx vertical), never silent.
+    Tables are handled by ``_content_chunks`` and authored as native PowerPoint
+    table shapes. Charts, KPI, SmartArt and images are still flattened to body text
+    because those native PPTX writers are not built yet. Each such flattening
+    records a ``block_degraded`` WARNING on ``sink`` so the down-render is visible
+    in QA (symmetric with the docx vertical), never silent.
     """
     lines: list[BodyLine] = []
     for block in blocks:
@@ -693,9 +815,6 @@ def _body_lines(blocks: list, sink: list) -> list[BodyLine]:
         elif isinstance(block, ir.ListBlock):
             for item in block.items:
                 _append_list_item(lines, item)
-        elif isinstance(block, ir.Table):
-            _append_table(lines, block)
-            _degrade(sink, "table")
         elif isinstance(block, ir.Kpi):
             for kpi in block.items:
                 parts = [p for p in (kpi.label, kpi.value, kpi.delta) if p]
@@ -719,7 +838,7 @@ def _degrade(sink: list, kind: str) -> None:
     """Record a ``block_degraded`` WARNING for a native block flattened to text.
 
     Mirrors the docx vertical's loud degradation so a deck that down-renders a
-    native table/chart/SmartArt/KPI/image to a textual stand-in is visible in QA
+    native chart/SmartArt/KPI/image to a textual stand-in is visible in QA
     rather than silently lost. The native writers themselves are DEFERRED.
     """
     sink.append(

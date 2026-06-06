@@ -92,7 +92,7 @@ flowchart TD
 
     E --> F{"Repair target"}
     F -->|Content too large| IDOC["rewrite/split IDoc blocks"]
-    F -->|PPTX native object loss| PPTX["use native table/chart/image authoring"]
+    F -->|PPTX native object loss| PPTX["use native object authoring when available"]
     F -->|Blank/overflow| COMP["adjust composition/layout/scaffold"]
     F -->|Named range too small| GRID["resize/split/truncate GridDocument with explanation"]
     F -->|Stale visible text| OCR["OCR/render-text guided cleanup"]
@@ -137,9 +137,9 @@ generated/<job>/
   "defects": [
     {
       "source": "qa.component_survival",
-      "symptom": "native table dropped from PPTX output",
-      "likely_cause": "table block down-rendered to text",
-      "repair": "enable native PPTX table authoring for this block"
+      "symptom": "native chart dropped from PPTX output",
+      "likely_cause": "chart block down-rendered to text",
+      "repair": "switch to native PPTX chart authoring when available, otherwise explain the unsupported component"
     }
   ],
   "next_action": "regenerate"
@@ -156,7 +156,7 @@ generated/<job>/
 | Stale derived index | stale TOC/agenda/list entries | regenerate field cache/index from current headings |
 | Blank pages/slides | `visual.blank_page`, large empty render | collapse/move/remove inherited scaffold or section break |
 | Edge bleed/clipping | `visual.edge_bleed`, visual inspection | split content, reduce block density, adjust composition |
-| Native object loss | `component_survival` warning | use native table/chart/image authoring or explain unsupported component |
+| Native object loss | `component_survival` warning | use native object authoring when available or explain unsupported component |
 | XLSX range overflow | named range bounds error | split data, shrink input, or ask user to expand template range |
 | Formula loss | formula preservation finding | stop and repair generator; never ship silently |
 

@@ -98,12 +98,15 @@ def _slide_body(slide) -> str:
 
 
 def _all_text(prs: Presentation) -> str:
-    return "\n".join(
-        shape.text
-        for slide in prs.slides
-        for shape in slide.placeholders
-        if shape.has_text_frame
-    )
+    parts: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                parts.append(shape.text)
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    parts.append("\t".join(cell.text for cell in row.cells))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -834,8 +837,8 @@ _COMPLEX_PPTX = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "co
 class PptxCheapFidelityTest(unittest.TestCase):
     """Regression coverage for the cheap PPTX fidelity fixes (P1/P4/P5/X7/Q14),
     grounded on the committed complex fixture (native table + chart + pictures +
-    multi-level lists). Native table/chart/SmartArt WRITERS are deferred; these tests
-    pin the cheap parts + the degradation/survival visibility that backs them."""
+    multi-level lists). Native table authoring is covered here; chart/SmartArt
+    writers remain deferred and visible through degradation/survival warnings."""
 
     def _branded(self, td: Path) -> Path:
         template = td / "branded.pptx"
@@ -917,8 +920,8 @@ class PptxCheapFidelityTest(unittest.TestCase):
         self.assertGreaterEqual(totals["chart"], 1)
         self.assertGreaterEqual(totals["picture"], 1)
 
-    # Q14 - a flattened native block emits a loud block_degraded WARNING -----------
-    def test_table_flatten_emits_block_degraded(self) -> None:
+    # Q14 - table blocks author real native PPTX tables ---------------------------
+    def test_table_block_authors_native_table_without_degradation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
             template = self._branded(tp)
@@ -929,10 +932,36 @@ class PptxCheapFidelityTest(unittest.TestCase):
                          rows=[[ir.TableCell(runs=[{"t": "North"}]), ir.TableCell(runs=[{"t": "100"}])]]),
             ])
             findings: list[Finding] = []
-            self._gen(template, idoc, out, findings=findings)
+            prs = self._gen(template, idoc, out, findings=findings)
+            tables = [
+                shape.table
+                for slide in prs.slides
+                for shape in slide.shapes
+                if getattr(shape, "has_table", False)
+            ]
+            self.assertEqual(len(tables), 1)
+            self.assertEqual(tables[0].cell(0, 0).text, "Region")
+            self.assertEqual(tables[0].cell(1, 0).text, "North")
             degraded = [f for f in findings if f.check == "block_degraded"]
-            self.assertTrue(degraded, findings)
-            self.assertTrue(all(f.severity == "WARNING" for f in degraded))
+            self.assertFalse(any("table" in f.message for f in degraded), findings)
+
+    def test_generated_native_table_satisfies_table_component_survival(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tp = Path(td)
+            prof = _extract_on_disk(_COMPLEX_PPTX, tp, name="acme")
+            idoc = ir.IntermediateDocument(blocks=[
+                ir.Heading(level=1, runs=[{"t": "Data"}]),
+                ir.Table(columns=[{"t": "Region"}, {"t": "Rev"}],
+                         rows=[[ir.TableCell(runs=[{"t": "North"}]), ir.TableCell(runs=[{"t": "100"}])]]),
+            ])
+            out = tp / "out.pptx"
+            findings: list[Finding] = []
+            pg.generate(prof, _COMPLEX_PPTX, idoc, out, findings=findings)
+            table_survival = [
+                f for f in findings
+                if f.check == "component_survival" and "native table" in f.message
+            ]
+            self.assertEqual(table_survival, [])
 
     # CC-3(b) - native component lost from shell -> component_survival WARNING -----
     def test_component_survival_warns_when_native_table_lost(self) -> None:

@@ -166,8 +166,9 @@ split across multiple content slides with a conservative capacity guard. When a
 current comprehension block is present, generation reconciles the deck by keeping
 structural slides, filling cover placeholders in place, clearing corroborated
 demo slides, and regenerating the agenda/section list from the new headings.
-Native tables/charts are still guarded as component-survival warnings rather than
-fully authored by the PPTX writer.
+Table blocks are authored as native PowerPoint table objects. Charts, SmartArt,
+KPI blocks and images are still guarded as degradation/component-survival
+warnings rather than fully authored by the PPTX writer.
 
 The two-stage visual audit closes the "L0-only" gap: L1 deterministic pixel
 proxies catch rendered-layout defects L0 cannot see (blank/broken slides, content
