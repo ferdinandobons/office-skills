@@ -613,10 +613,11 @@ def run_visual_ocr(
             report["errors"].append({"page": i, "error": error})
             continue
         page_hits = _ocr_hits(text, terms)
+        limited_text, truncated = _limit_ocr_text(text)
         page = {
             "index": i,
-            "text": _limit_ocr_text(text),
-            "text_truncated": len(text) > OCR_TEXT_LIMIT,
+            "text": limited_text,
+            "text_truncated": truncated,
         }
         if page_hits:
             page["hits"] = page_hits
@@ -731,11 +732,17 @@ def _normalize_ocr_match(text: str) -> str:
     return _normalize_ocr_space(text).casefold()
 
 
-def _limit_ocr_text(text: str) -> str:
+def _limit_ocr_text(text: str) -> tuple[str, bool]:
+    """Normalize OCR whitespace, then cap to ``OCR_TEXT_LIMIT``.
+
+    Returns the (possibly truncated) text together with whether truncation
+    occurred. Both are derived from the same normalized string so the
+    advisory ``text_truncated`` flag can never disagree with the stored
+    text (the raw tesseract output is dominated by per-line newlines, so a
+    flag computed from its length would over-report truncation).
+    """
     text = _normalize_ocr_space(text)
-    if len(text) <= OCR_TEXT_LIMIT:
-        return text
-    return text[:OCR_TEXT_LIMIT]
+    return text[:OCR_TEXT_LIMIT], len(text) > OCR_TEXT_LIMIT
 
 
 # ---------------------------------------------------------------------------
