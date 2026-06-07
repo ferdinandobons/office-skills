@@ -59,6 +59,7 @@ random or timestamp, so re-running yields an identical file.
 Run:
     PYTHONPATH=scripts .venv/bin/python tests/fixtures/builders/build_complex_docx.py
 """
+
 from __future__ import annotations
 
 import struct
@@ -189,8 +190,18 @@ def _synthetic_logo_png() -> bytes:
 # into ``word/styles.xml`` via lxml so we control header shading / banding /
 # borders python-docx cannot express.
 # ---------------------------------------------------------------------------
-def _add_paragraph_style(styles, style_id, name, *, based_on="Normal", color=None,
-                         bold=False, size_pt=None, shading=None, box_border=None):
+def _add_paragraph_style(
+    styles,
+    style_id,
+    name,
+    *,
+    based_on="Normal",
+    color=None,
+    bold=False,
+    size_pt=None,
+    shading=None,
+    box_border=None,
+):
     st = _sub(styles, "style", type="paragraph", styleId=style_id)
     st.set(_w("customStyle"), "1")
     _sub(st, "name", val=name)
@@ -318,12 +329,25 @@ def _build_styles(doc):
     _ensure_list_paragraph_style(styles)
     _ensure_toc_styles(styles)
     # Branded paragraph styles.
-    _add_paragraph_style(styles, "AcmeCoverTitle", "Acme Cover Title",
-                         color=ACME_NAVY, bold=True, size_pt=28)
-    _add_paragraph_style(styles, "AcmeCoverSubtitle", "Acme Cover Subtitle",
-                         color=ACME_TEAL, size_pt=14)
-    _add_paragraph_style(styles, "AcmeCallout", "Acme Callout",
-                         color=ACME_NAVY, shading=ACME_LIGHT, box_border=ACME_TEAL)
+    _add_paragraph_style(
+        styles,
+        "AcmeCoverTitle",
+        "Acme Cover Title",
+        color=ACME_NAVY,
+        bold=True,
+        size_pt=28,
+    )
+    _add_paragraph_style(
+        styles, "AcmeCoverSubtitle", "Acme Cover Subtitle", color=ACME_TEAL, size_pt=14
+    )
+    _add_paragraph_style(
+        styles,
+        "AcmeCallout",
+        "Acme Callout",
+        color=ACME_NAVY,
+        shading=ACME_LIGHT,
+        box_border=ACME_TEAL,
+    )
     # List styles -> reference w:num 1 (bullet L1), 2 (bullet L2), 3 (number L1).
     _add_list_style(styles, "AcmeBulletL1", "Acme Bullet L1", num_id=1)
     _add_list_style(styles, "AcmeBulletL2", "Acme Bullet L2", num_id=2)
@@ -352,15 +376,15 @@ def _populate_numbering(root) -> None:
         an = _sub(root, "abstractNum", abstractNumId=str(aid))
         _sub(an, "multiLevelType", val="hybridMultilevel")
         for lvl, (fmt, text, indent) in enumerate(levels):
-            l = _sub(an, "lvl", ilvl=str(lvl))
-            _sub(l, "start", val="1")
-            _sub(l, "numFmt", val=fmt)
-            _sub(l, "lvlText", val=text)
-            _sub(l, "lvlJc", val="left")
-            pPr = _sub(l, "pPr")
+            lvl_el = _sub(an, "lvl", ilvl=str(lvl))
+            _sub(lvl_el, "start", val="1")
+            _sub(lvl_el, "numFmt", val=fmt)
+            _sub(lvl_el, "lvlText", val=text)
+            _sub(lvl_el, "lvlJc", val="left")
+            pPr = _sub(lvl_el, "pPr")
             _sub(pPr, "ind", left=str(indent), hanging="360")
             if fmt == "bullet":
-                rPr = _sub(l, "rPr")
+                rPr = _sub(lvl_el, "rPr")
                 rfonts = _sub(rPr, "rFonts")
                 rfonts.set(_w("ascii"), "Symbol")
                 rfonts.set(_w("hAnsi"), "Symbol")
@@ -393,9 +417,13 @@ def _build_footnotes_xml() -> bytes:
         _sub(r, kind if kind == "separator" else "continuationSeparator")
 
     s = _sub(root, "footnote", type="separator", id="-1")
-    p = _sub(s, "p"); r = _sub(p, "r"); _sub(r, "separator")
+    p = _sub(s, "p")
+    r = _sub(p, "r")
+    _sub(r, "separator")
     c = _sub(root, "footnote", type="continuationSeparator", id="0")
-    p = _sub(c, "p"); r = _sub(p, "r"); _sub(r, "continuationSeparator")
+    p = _sub(c, "p")
+    r = _sub(p, "r")
+    _sub(r, "continuationSeparator")
 
     # The authored footnote (id 2).
     fn = _sub(root, "footnote", id="2")
@@ -447,7 +475,7 @@ def _cover_title_sdt():
     placeholder = _sub(sdtPr, "placeholder")
     _sub(placeholder, "docPart", val="DefaultPlaceholder_Title")
     _sub(sdtPr, "text")
-    sdtEndPr = _sub(sdt, "sdtEndPr")
+    _sub(sdt, "sdtEndPr")
     sdtContent = _sub(sdt, "sdtContent")
     p = _sub(sdtContent, "p")
     pPr = _sub(p, "pPr")
@@ -499,7 +527,7 @@ def _toc_entry(doc, label, page, *, style):
     tab = _sub(pp, "r")
     _sub(tab, "tab")
     pp.append(_fldchar("begin"))
-    pp.append(_run(f' PAGEREF _Toc{page:04d} \\h ', instr=True))
+    pp.append(_run(f" PAGEREF _Toc{page:04d} \\h ", instr=True))
     pp.append(_fldchar("separate"))
     pp.append(_run(str(page)))
     pp.append(_fldchar("end"))
@@ -573,7 +601,7 @@ def _seq_caption(doc, prefix, seq_name, tail, *, style="Caption"):
     pp = p._p
     pp.append(_run(f"{prefix} "))
     pp.append(_fldchar("begin"))
-    pp.append(_run(f' SEQ {seq_name} \\* ARABIC ', instr=True))
+    pp.append(_run(f" SEQ {seq_name} \\* ARABIC ", instr=True))
     pp.append(_fldchar("separate"))
     pp.append(_run("1"))
     pp.append(_fldchar("end"))
@@ -599,8 +627,16 @@ def _build_table(doc):
     table.style = "Acme Table"
     # Tell Word which conditional formats to apply (first row + banding).
     tblPr = table._tbl.tblPr
-    look = _sub(tblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
-                lastColumn="0", noHBand="0", noVBand="1")
+    _sub(
+        tblPr,
+        "tblLook",
+        firstRow="1",
+        lastRow="0",
+        firstColumn="0",
+        lastColumn="0",
+        noHBand="0",
+        noVBand="1",
+    )
     hdr = ("Quarter", "Revenue", "Growth", "Region")
     for c, label in zip(table.rows[0].cells, hdr):
         c.text = label
@@ -636,7 +672,7 @@ def _build_callout(doc):
 def _build_footnote_paragraph(doc, footnote_id):
     _p(doc, "Acme footnote demo", "Heading2")
     body = doc.add_paragraph("Acme Corp")
-    run = body.add_run(" is a registered placeholder brand")
+    body.add_run(" is a registered placeholder brand")
     # Append a footnoteReference run (id -> footnotes.xml).
     fr = _sub(body._p, "r")
     frpr = _sub(fr, "rPr")
@@ -666,15 +702,19 @@ def _build_demo_body(doc):
 def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     drawing = _el("drawing")
     inline = etree.SubElement(drawing, f"{{{WP}}}inline")
-    inline.set("distT", "0"); inline.set("distB", "0")
-    inline.set("distL", "0"); inline.set("distR", "0")
+    inline.set("distT", "0")
+    inline.set("distB", "0")
+    inline.set("distL", "0")
+    inline.set("distR", "0")
     ext = etree.SubElement(inline, f"{{{WP}}}extent")
-    ext.set("cx", str(cx)); ext.set("cy", str(cy))
+    ext.set("cx", str(cx))
+    ext.set("cy", str(cy))
     eff = etree.SubElement(inline, f"{{{WP}}}effectExtent")
     for k in ("l", "t", "r", "b"):
         eff.set(k, "0")
     docpr = etree.SubElement(inline, f"{{{WP}}}docPr")
-    docpr.set("id", str(doc_pr_id)); docpr.set("name", name)
+    docpr.set("id", str(doc_pr_id))
+    docpr.set("name", name)
     cnv = etree.SubElement(inline, f"{{{WP}}}cNvGraphicFramePr")
     locks = etree.SubElement(cnv, f"{{{A}}}graphicFrameLocks")
     locks.set("noChangeAspect", "1")
@@ -684,7 +724,8 @@ def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     pic = etree.SubElement(gdata, f"{{{PIC}}}pic")
     nvpic = etree.SubElement(pic, f"{{{PIC}}}nvPicPr")
     cnvpr = etree.SubElement(nvpic, f"{{{PIC}}}cNvPr")
-    cnvpr.set("id", "0"); cnvpr.set("name", name)
+    cnvpr.set("id", "0")
+    cnvpr.set("name", name)
     etree.SubElement(nvpic, f"{{{PIC}}}cNvPicPr")
     blipfill = etree.SubElement(pic, f"{{{PIC}}}blipFill")
     blip = etree.SubElement(blipfill, f"{{{A}}}blip")
@@ -693,9 +734,14 @@ def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     etree.SubElement(stretch, f"{{{A}}}fillRect")
     sppr = etree.SubElement(pic, f"{{{PIC}}}spPr")
     xfrm = etree.SubElement(sppr, f"{{{A}}}xfrm")
-    off = etree.SubElement(xfrm, f"{{{A}}}off"); off.set("x", "0"); off.set("y", "0")
-    extb = etree.SubElement(xfrm, f"{{{A}}}ext"); extb.set("cx", str(cx)); extb.set("cy", str(cy))
-    geom = etree.SubElement(sppr, f"{{{A}}}prstGeom"); geom.set("prst", "rect")
+    off = etree.SubElement(xfrm, f"{{{A}}}off")
+    off.set("x", "0")
+    off.set("y", "0")
+    extb = etree.SubElement(xfrm, f"{{{A}}}ext")
+    extb.set("cx", str(cx))
+    extb.set("cy", str(cy))
+    geom = etree.SubElement(sppr, f"{{{A}}}prstGeom")
+    geom.set("prst", "rect")
     etree.SubElement(geom, f"{{{A}}}avLst")
     return drawing
 
@@ -752,7 +798,7 @@ def _add_landscape_section(doc):
     new_section = doc.add_section(WD_SECTION.NEW_PAGE)
     new_section.orientation = WD_ORIENT.LANDSCAPE
     # Swap page width/height for landscape (python-docx does not auto-swap).
-    new_section.page_width = Twips(15840)   # 11"
+    new_section.page_width = Twips(15840)  # 11"
     new_section.page_height = Twips(12240)  # 8.5"
     _p(doc, "Acme landscape appendix", "Heading1")
     doc.add_paragraph(
@@ -786,7 +832,8 @@ def build(out: Path = OUT) -> Path:
 
     # 3) Footnotes part attached; footnote id 2 is the authored note.
     _attach_part(
-        doc, "word/footnotes.xml",
+        doc,
+        "word/footnotes.xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
         _build_footnotes_xml(),
         f"{R}/footnotes",

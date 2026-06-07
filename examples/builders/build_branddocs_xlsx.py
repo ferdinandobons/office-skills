@@ -37,16 +37,22 @@ defined names, so re-running the builder yields an identical file (CI-friendly).
 Run:
     PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_xlsx.py
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.comments import Comment
-from openpyxl.chart import BarChart, LineChart, Reference, Series
+from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.series import SeriesLabel
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule
+from openpyxl.formatting.rule import (
+    CellIsRule,
+    ColorScaleRule,
+    DataBarRule,
+    FormulaRule,
+)
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -66,8 +72,8 @@ WHITE = "FFFFFFFF"
 
 # 6-digit (no alpha) variants for openpyxl chart series fills, derived from the
 # brand palette constants above (no new brand literals introduced).
-NAVY6 = BRAND_NAVY[-6:]   # "16213F"
-TEAL6 = BRAND_TEAL[-6:]   # "2B7CD3"
+NAVY6 = BRAND_NAVY[-6:]  # "16213F"
+TEAL6 = BRAND_TEAL[-6:]  # "2B7CD3"
 AMBER6 = BRAND_AMBER[-6:]  # "E0742B"
 
 
@@ -157,7 +163,9 @@ def _build_cover(wb: Workbook) -> None:
     ws["G4"].style = "BrandDocsHeader"
     ws["G5"] = "3 formats"
     ws["G5"].style = "BrandDocsKPI"
-    ws["G5"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws["G5"].alignment = Alignment(
+        horizontal="center", vertical="center", wrap_text=True
+    )
 
     # A navy brand band across the printable width, below the scorecards.
     ws.merge_cells("A8:G8")
@@ -249,7 +257,9 @@ def _build_model(wb: Workbook) -> None:
         # FY Total (col 6) = SUM of the four quarters in this row.
         ws.cell(row=r, column=6, value=f"=SUM(B{r}:E{r})").number_format = "#,##0"
         # % of FY (col 7) = this row's FY total / net-revenue FY total (row 7).
-        ws.cell(row=r, column=7, value=f"=IF($F$7=0,0,F{r}/$F$7)").number_format = "0.0%"
+        ws.cell(
+            row=r, column=7, value=f"=IF($F$7=0,0,F{r}/$F$7)"
+        ).number_format = "0.0%"
     # A grand-total SUBTOTAL row 9 (col 6).
     ws.cell(row=9, column=1, value="Subtotal (visible)")
     ws.cell(row=9, column=6, value="=SUBTOTAL(9,F4:F6)").number_format = "#,##0"
@@ -268,20 +278,26 @@ def _build_model(wb: Workbook) -> None:
     ws.conditional_formatting.add(
         "B4:E6",
         ColorScaleRule(
-            start_type="min", start_color="FFF8696B",
-            mid_type="percentile", mid_value=50, mid_color="FFFFEB84",
-            end_type="max", end_color="FF63BE7B",
+            start_type="min",
+            start_color="FFF8696B",
+            mid_type="percentile",
+            mid_value=50,
+            mid_color="FFFFEB84",
+            end_type="max",
+            end_color="FF63BE7B",
         ),
     )
     ws.conditional_formatting.add(
         "G4:G7",
-        CellIsRule(operator="greaterThan", formula=["0.5"],
-                   fill=PatternFill("solid", fgColor=BRAND_AMBER)),
+        CellIsRule(
+            operator="greaterThan",
+            formula=["0.5"],
+            fill=PatternFill("solid", fgColor=BRAND_AMBER),
+        ),
     )
     ws.conditional_formatting.add(
         "F4:F6",
-        FormulaRule(formula=["F4<0"],
-                    fill=PatternFill("solid", fgColor="FFFFC7CE")),
+        FormulaRule(formula=["F4<0"], fill=PatternFill("solid", fgColor="FFFFC7CE")),
     )
     ws.freeze_panes = "B4"
     # Wider label column, tighter numeric columns so the table + chart fit a page.
@@ -383,7 +399,9 @@ def _build_dashboard(wb: Workbook) -> None:
     ws["A1"] = "Executive Dashboard"
     ws["A1"].font = Font(name="Arial", size=18, bold=True, color=BRAND_NAVY)
     ws.merge_cells("A1:G1")
-    ws["A2"] = "Formula-backed snapshot generated from the model, inputs, and summary tabs"
+    ws["A2"] = (
+        "Formula-backed snapshot generated from the model, inputs, and summary tabs"
+    )
     ws["A2"].font = Font(name="Arial", size=11, italic=True, color=BRAND_TEAL)
     ws.merge_cells("A2:G2")
 
@@ -394,14 +412,20 @@ def _build_dashboard(wb: Workbook) -> None:
         (7, "Scenario", "=Scenarios!B3", "@"),
     ]
     for start_col, label, formula, number_format in kpis:
-        ws.merge_cells(start_row=4, start_column=start_col, end_row=4, end_column=start_col + 1)
-        ws.merge_cells(start_row=5, start_column=start_col, end_row=5, end_column=start_col + 1)
+        ws.merge_cells(
+            start_row=4, start_column=start_col, end_row=4, end_column=start_col + 1
+        )
+        ws.merge_cells(
+            start_row=5, start_column=start_col, end_row=5, end_column=start_col + 1
+        )
         cell = ws.cell(row=4, column=start_col, value=label)
         cell.style = "BrandDocsHeader"
         value_cell = ws.cell(row=5, column=start_col, value=formula)
         value_cell.style = "BrandDocsKPI"
         value_cell.number_format = number_format
-        value_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        value_cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
     ws["A7"] = "Quarter"
     ws["B7"] = "Net revenue"
     ws["C7"] = "Growth"
@@ -415,7 +439,7 @@ def _build_dashboard(wb: Workbook) -> None:
         if i == 8:
             ws.cell(row=i, column=3, value="-")
         else:
-            ws.cell(row=i, column=3, value=f"=IF(B{i-1}=0,0,B{i}/B{i-1}-1)")
+            ws.cell(row=i, column=3, value=f"=IF(B{i - 1}=0,0,B{i}/B{i - 1}-1)")
             ws.cell(row=i, column=3).number_format = "0.0%"
     ws.conditional_formatting.add(
         "B8:B11",
@@ -424,7 +448,9 @@ def _build_dashboard(wb: Workbook) -> None:
 
     chart = BarChart()
     chart.title = "Net revenue"
-    chart.add_data(Reference(ws, min_col=2, min_row=7, max_row=11), titles_from_data=True)
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=7, max_row=11), titles_from_data=True
+    )
     chart.set_categories(Reference(ws, min_col=1, min_row=8, max_row=11))
     chart.series[0].graphicalProperties.solidFill = TEAL6
     chart.legend = None
@@ -447,10 +473,14 @@ def _build_scenarios(wb: Workbook) -> None:
     ws["A3"] = "Selected scenario"
     ws["B3"] = "Base"
     ws["B3"].style = "BrandDocsInput"
-    dv = DataValidation(type="list", formula1='"Base,Upside,Downside"', allow_blank=False)
+    dv = DataValidation(
+        type="list", formula1='"Base,Upside,Downside"', allow_blank=False
+    )
     ws.add_data_validation(dv)
     dv.add(ws["B3"])
-    ws["B3"].comment = Comment("Synthetic scenario selector used by formulas and visual QA.", "BrandDocs")
+    ws["B3"].comment = Comment(
+        "Synthetic scenario selector used by formulas and visual QA.", "BrandDocs"
+    )
     headers = ("Scenario", "Revenue multiplier", "Margin delta", "Narrative")
     for col, label in enumerate(headers, start=1):
         ws.cell(row=5, column=col, value=label).style = "BrandDocsHeader"
@@ -466,10 +496,10 @@ def _build_scenarios(wb: Workbook) -> None:
                 cell.style = "BrandDocsPercent" if c == 3 else "BrandDocsInput"
                 cell.number_format = "0.0%" if c == 3 else "0.00x"
     ws["A10"] = "Scenario revenue"
-    ws["B10"] = '=Summary!B4*INDEX(B6:B8,MATCH($B$3,A6:A8,0))'
+    ws["B10"] = "=Summary!B4*INDEX(B6:B8,MATCH($B$3,A6:A8,0))"
     ws["B10"].number_format = "#,##0"
     ws["A11"] = "Scenario margin"
-    ws["B11"] = '=Summary!B8+INDEX(C6:C8,MATCH($B$3,A6:A8,0))'
+    ws["B11"] = "=Summary!B8+INDEX(C6:C8,MATCH($B$3,A6:A8,0))"
     ws["B11"].number_format = "0.0%"
     table = Table(displayName="BrandDocsScenarioTbl", ref="A5:D8")
     table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)

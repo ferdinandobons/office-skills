@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """DOCX extraction for M1."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -14,7 +15,13 @@ from brandkit.ooxml import pack
 from brandkit.profile import schema, store
 
 
-def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str | Path | None = None) -> Path:
+def extract(
+    template: str | Path,
+    name: str,
+    *,
+    scope: str = "project",
+    cwd: str | Path | None = None,
+) -> Path:
     template_path = Path(template)
     shell_bytes = template_path.read_bytes()
     doc = Document(template_path)
@@ -47,7 +54,10 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
         "docx",
         {"name": name, "display_name": name},
         extracted_at=datetime.now(timezone.utc).isoformat(),
-        source_template={"filename": template_path.name, "sha256": store.sha256_file(template_path)},
+        source_template={
+            "filename": template_path.name,
+            "sha256": store.sha256_file(template_path),
+        },
         theme=theme,
         roles=role_registry,
         surface=surface,
@@ -55,12 +65,16 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
     )
     profile["anchors"] = anchors
     profile["provenance"]["ooxml_parts_seen"] = pack.list_parts(template_path)
-    profile["artifact_catalog"] = _artifact_catalog(template_path, doc, profile["provenance"]["ooxml_parts_seen"])
+    profile["artifact_catalog"] = _artifact_catalog(
+        template_path, doc, profile["provenance"]["ooxml_parts_seen"]
+    )
     profile["capabilities"] = _capabilities()
 
     target = store.target_dir_for_save(name, scope, cwd=cwd)
     extra = {"PROFILE.md": _profile_markdown(profile)}
-    return store.save_profile(target, profile, shell_bytes, extra_files=extra, overwrite=True)
+    return store.save_profile(
+        target, profile, shell_bytes, extra_files=extra, overwrite=True
+    )
 
 
 def _extract_theme(path: Path) -> dict:
@@ -136,7 +150,9 @@ def _style_details(doc) -> list[dict]:
                 "style_id": getattr(style, "style_id", None),
                 "name": style.name,
                 "type": str(style.type),
-                "based_on": style.base_style.name if getattr(style, "base_style", None) else None,
+                "based_on": style.base_style.name
+                if getattr(style, "base_style", None)
+                else None,
                 "font": {
                     "name": getattr(font, "name", None),
                     "size_pt": (font.size.pt if getattr(font, "size", None) else None),
@@ -167,8 +183,12 @@ def _profile_markdown(profile: dict) -> str:
     ]
     lines.extend(_structure_markdown(profile))
     lines.extend(["", "## Roles", ""])
-    lines.append("Each role lists its concrete style and its usage (scope · placement · required).")
-    lines.append("`structural` roles belong to the ordered skeleton and must appear in their slot;")
+    lines.append(
+        "Each role lists its concrete style and its usage (scope · placement · required)."
+    )
+    lines.append(
+        "`structural` roles belong to the ordered skeleton and must appear in their slot;"
+    )
     lines.append("`freeform` roles are used on demand inside the freeform body region.")
     lines.append("")
     for rid in profile.get("roles", {}).get("_index", []):
@@ -197,7 +217,9 @@ def _structure_markdown(profile: dict) -> list[str]:
         )
     )
     lines.append("")
-    for region in sorted(skeleton, key=lambda r: (r.get("order") if r.get("order") is not None else 0)):
+    for region in sorted(
+        skeleton, key=lambda r: r.get("order") if r.get("order") is not None else 0
+    ):
         flags = []
         if region.get("required"):
             flags.append("required")

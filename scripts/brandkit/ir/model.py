@@ -31,6 +31,7 @@ Every block subclasses :class:`Block`, which carries the discriminator
 ``type`` and an optional free-form ``id`` and ``meta``. ``from_dict`` dispatches
 on ``type`` via :data:`BLOCK_TYPES`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -209,7 +210,7 @@ class Table(Block):
     """A table. Resolves to ``table.{role}`` + a header style."""
 
     TYPE: ClassVar[str] = "table"
-    columns: list[Run] = field(default_factory=list)   # header-row cells (rich)
+    columns: list[Run] = field(default_factory=list)  # header-row cells (rich)
     rows: list[list[TableCell]] = field(default_factory=list)
     caption: Optional[list[Run]] = None
     role: str = "default"
@@ -231,14 +232,17 @@ class Table(Block):
             for c in (data.get("columns") or [])
         ]
         rows = [
-            [TableCell.from_dict(c) for c in row]
-            for row in (data.get("rows") or [])
+            [TableCell.from_dict(c) for c in row] for row in (data.get("rows") or [])
         ]
         caption = (
-            textutil.normalize_runs(data.get("caption")) if data.get("caption") else None
+            textutil.normalize_runs(data.get("caption"))
+            if data.get("caption")
+            else None
         )
         return cls(
-            columns=columns, rows=rows, caption=caption,
+            columns=columns,
+            rows=rows,
+            caption=caption,
             role=data.get("role", "default"),
             **cls._common_kwargs(data),
         )
@@ -326,7 +330,7 @@ class Chart(Block):
 
     TYPE: ClassVar[str] = "chart"
     chart_type: str = "bar"
-    series: list[dict] = field(default_factory=list)   # [{"name", "values":[...]}]
+    series: list[dict] = field(default_factory=list)  # [{"name", "values":[...]}]
     categories: list[str] = field(default_factory=list)
     title: Optional[str] = None
 
@@ -357,7 +361,7 @@ class SmartArt(Block):
 
     TYPE: ClassVar[str] = "smartart"
     diagram: str = "process"
-    nodes: list[dict] = field(default_factory=list)   # [{"text", "children":[...]}]
+    nodes: list[dict] = field(default_factory=list)  # [{"text", "children":[...]}]
 
     def _payload(self) -> dict:
         return {"diagram": self.diagram, "nodes": self.nodes}
@@ -502,7 +506,9 @@ class Image(Block):
             asset=data.get("asset"),
             src=data.get("src"),
             alt=data.get("alt"),
-            caption=textutil.normalize_runs(data["caption"]) if data.get("caption") else None,
+            caption=textutil.normalize_runs(data["caption"])
+            if data.get("caption")
+            else None,
             width_emu=data.get("width_emu"),
             height_emu=data.get("height_emu"),
             **cls._common_kwargs(data),
@@ -528,7 +534,8 @@ class Quote(Block):
         return cls(
             runs=textutil.normalize_runs(data.get("runs"), text=data.get("text")),
             attribution=textutil.normalize_runs(data["attribution"])
-            if data.get("attribution") else None,
+            if data.get("attribution")
+            else None,
             **cls._common_kwargs(data),
         )
 
@@ -594,7 +601,9 @@ class Cover:
             return None
         return cls(
             title=textutil.normalize_runs(data["title"]) if data.get("title") else None,
-            subtitle=textutil.normalize_runs(data["subtitle"]) if data.get("subtitle") else None,
+            subtitle=textutil.normalize_runs(data["subtitle"])
+            if data.get("subtitle")
+            else None,
             fields=dict(data.get("fields") or {}),
         )
 

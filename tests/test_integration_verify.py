@@ -25,13 +25,13 @@ Two layers:
    It is skipped automatically when the proprietary template is absent, so the
    suite stays green on any machine.
 """
+
 from __future__ import annotations
 
 import sys
 import tempfile
 import unittest
 import zipfile
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -142,11 +142,14 @@ class TocSdtCollisionTest(unittest.TestCase):
             # Count the TOC SDT's non-empty text runs before generation.
             pre = Document(shell)
             toc_sdt_pre = next(
-                el for el in pre.element.body
+                el
+                for el in pre.element.body
                 if _local_name(el.tag) == "sdt"
                 and structure._element_holds_strong_toc(el)
             )
-            pre_runs = len([t for t in toc_sdt_pre.iter(w("t")) if (t.text or "").strip()])
+            pre_runs = len(
+                [t for t in toc_sdt_pre.iter(w("t")) if (t.text or "").strip()]
+            )
             self.assertGreater(pre_runs, 0)
 
             out = Path(td) / "out.docx"
@@ -161,7 +164,8 @@ class TocSdtCollisionTest(unittest.TestCase):
             gen = Document(out)
             children = list(gen.element.body)
             toc_sdt = next(
-                el for el in children
+                el
+                for el in children
                 if _local_name(el.tag) == "sdt"
                 and structure._element_holds_strong_toc(el)
             )
@@ -172,7 +176,10 @@ class TocSdtCollisionTest(unittest.TestCase):
             self.assertIn("Section", _ptext(toc_sdt))
             self.assertNotIn("Esempio di titolo cached entry", _ptext(toc_sdt))
             self.assertTrue(
-                any((d.text or "").strip().startswith("TOC") for d in toc_sdt.iter(w("instrText")))
+                any(
+                    (d.text or "").strip().startswith("TOC")
+                    for d in toc_sdt.iter(w("instrText"))
+                )
             )
             # The title still landed somewhere in the document (on the cover),
             # never inside the TOC, with a degraded finding (no real cover anchor).
@@ -199,13 +206,20 @@ class RealTemplateIntegrationTest(unittest.TestCase):
             "blocks": [
                 {"type": "heading", "level": 1, "runs": [{"t": "First Heading QQ1"}]},
                 {"type": "paragraph", "runs": [{"t": "Body alpha UNIQUEBODY42."}]},
-                {"type": "list", "ordered": False, "items": [
-                    {"text": "Top NL_TOP", "items": [
-                        {"text": "Child NL_CHILD_A"},
-                        {"text": "Child NL_CHILD_B"},
-                    ]},
-                    {"text": "Second NL_TOP2"},
-                ]},
+                {
+                    "type": "list",
+                    "ordered": False,
+                    "items": [
+                        {
+                            "text": "Top NL_TOP",
+                            "items": [
+                                {"text": "Child NL_CHILD_A"},
+                                {"text": "Child NL_CHILD_B"},
+                            ],
+                        },
+                        {"text": "Second NL_TOP2"},
+                    ],
+                },
                 {"type": "image", "alt": "unhandled image block"},
                 {"type": "heading", "level": 2, "runs": [{"t": "Second Heading QQ2"}]},
                 {"type": "paragraph", "runs": [{"t": "Closing ENDBODY77."}]},
@@ -214,7 +228,11 @@ class RealTemplateIntegrationTest(unittest.TestCase):
         out = td / "out.docx"
         findings: list[Finding] = []
         docx_generate.generate(
-            loaded.profile, loaded.shell_path, ir.parse_idoc(iid), out, findings=findings
+            loaded.profile,
+            loaded.shell_path,
+            ir.parse_idoc(iid),
+            out,
+            findings=findings,
         )
         return out, findings
 
@@ -222,7 +240,9 @@ class RealTemplateIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
             out, findings = self._extract_and_generate(td)
-            self.assertIsNone(zipfile.ZipFile(out).testzip(), "generated docx is corrupt")
+            self.assertIsNone(
+                zipfile.ZipFile(out).testzip(), "generated docx is corrupt"
+            )
 
             gen = Document(out)
             children = list(gen.element.body)
@@ -231,7 +251,9 @@ class RealTemplateIntegrationTest(unittest.TestCase):
 
             def region_text(region):
                 return "\n".join(
-                    _ptext(children[c["index"]]) for c in classes if c["region"] == region
+                    _ptext(children[c["index"]])
+                    for c in classes
+                    if c["region"] == region
                 )
 
             body_text = region_text("body")
@@ -246,8 +268,12 @@ class RealTemplateIntegrationTest(unittest.TestCase):
 
             # --- M3: cover title on the cover, before the real TOC field ---
             title_idx = next(
-                (i for i, el in enumerate(children)
-                 if _local_name(el.tag) == "p" and "INTEGRATION COVER XZ9" in _ptext(el)),
+                (
+                    i
+                    for i, el in enumerate(children)
+                    if _local_name(el.tag) == "p"
+                    and "INTEGRATION COVER XZ9" in _ptext(el)
+                ),
                 None,
             )
             self.assertIsNotNone(title_idx, "cover title not found as a paragraph")
@@ -255,11 +281,19 @@ class RealTemplateIntegrationTest(unittest.TestCase):
             # the title must NOT sit inside any TOC content control
             self.assertNotIn("INTEGRATION COVER XZ9", toc_text)
             first_toc_field = next(
-                (i for i, el in enumerate(children)
-                 if any((d.text or "").strip().startswith("TOC") for d in el.iter(w("instrText")))),
+                (
+                    i
+                    for i, el in enumerate(children)
+                    if any(
+                        (d.text or "").strip().startswith("TOC")
+                        for d in el.iter(w("instrText"))
+                    )
+                ),
                 None,
             )
-            self.assertIsNotNone(first_toc_field, "TOC field disappeared (M3 regression)")
+            self.assertIsNotNone(
+                first_toc_field, "TOC field disappeared (M3 regression)"
+            )
             self.assertLess(title_idx, first_toc_field, "title landed after the TOC")
             # the preserved TOC content survived (not blanked by the cover fill)
             self.assertIn("Indice delle figure", toc_text)
@@ -277,9 +311,14 @@ class RealTemplateIntegrationTest(unittest.TestCase):
                 el = children[c["index"]]
                 if _local_name(el.tag) == "p" and _ptext(el).strip() == "":
                     empty_body += 1
-            self.assertEqual(empty_body, 0, "unhandled block injected an empty paragraph")
+            self.assertEqual(
+                empty_body, 0, "unhandled block injected an empty paragraph"
+            )
             self.assertTrue(
-                any(f.check == "block_degraded" and "image" in f.message for f in findings)
+                any(
+                    f.check == "block_degraded" and "image" in f.message
+                    for f in findings
+                )
             )
 
             # --- M2: every nested list item present, in order ---
@@ -315,8 +354,10 @@ class RealTemplateIntegrationTest(unittest.TestCase):
             self.assertTrue(report.passed, [f.message for f in report.findings])
             # no resolver_targets_exist ERROR on a real, faithful profile
             self.assertFalse(
-                any(f.check == "resolver_targets_exist" and f.severity == "ERROR"
-                    for f in report.findings)
+                any(
+                    f.check == "resolver_targets_exist" and f.severity == "ERROR"
+                    for f in report.findings
+                )
             )
 
 

@@ -13,6 +13,7 @@ without a model and assert:
      template-specific literal becomes a matching rule);
   4. every authored file keeps its ``SPDX-License-Identifier: MIT`` header.
 """
+
 from __future__ import annotations
 
 import unittest
@@ -24,7 +25,7 @@ SKILLS = ("brand-docx", "brand-pptx", "brand-xlsx")
 # The verbatim anti-overfitting directive the shared prompt must state (plan §8).
 ANTI_OVERFIT = (
     'A title slot is a title slot whether its placeholder reads "Titolo", "Title",\n'
-    "> or \"Titre\". Quote a literal **only as evidence**, never as a matching rule."
+    '> or "Titre". Quote a literal **only as evidence**, never as a matching rule.'
 )
 # Non-language placeholder ids the worked example must use (and only these as refs).
 PLACEHOLDER_IDS = ("<slot-1>", "<index-A>", "<region-1>")
@@ -44,7 +45,9 @@ def _skill_md(skill: str) -> Path:
 class SharedComprehensionPromptTest(unittest.TestCase):
     def test_all_three_reference_docs_exist(self) -> None:
         for skill in SKILLS:
-            self.assertTrue(_comp_md(skill).is_file(), f"missing {skill} comprehension.md")
+            self.assertTrue(
+                _comp_md(skill).is_file(), f"missing {skill} comprehension.md"
+            )
 
     def test_byte_identical_across_formats(self) -> None:
         bodies = {skill: _comp_md(skill).read_bytes() for skill in SKILLS}

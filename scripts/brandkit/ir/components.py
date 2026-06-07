@@ -10,6 +10,7 @@ directly, so this hook expands every such block into its primitive sub-blocks
 rather than silently dropped - off-brand / missing content must never pass
 silently.
 """
+
 from __future__ import annotations
 
 from brandkit.ir.model import IntermediateDocument, block_from_dict
@@ -20,7 +21,9 @@ class ComponentExpansionError(ValueError):
     """Raised when a component/section ref is not defined in the profile."""
 
 
-def expand_components(document: IntermediateDocument, profile: dict) -> IntermediateDocument:
+def expand_components(
+    document: IntermediateDocument, profile: dict
+) -> IntermediateDocument:
     """Return a document whose component/section blocks are expanded to primitives.
 
     A ``component``/``section`` block is replaced, in place, by the primitive
@@ -37,13 +40,23 @@ def expand_components(document: IntermediateDocument, profile: dict) -> Intermed
 
 def _expand_blocks(blocks, components, sections, *, _depth: int):
     if _depth > 16:
-        raise ComponentExpansionError("component/section expansion exceeded max depth (cycle?)")
+        raise ComponentExpansionError(
+            "component/section expansion exceeded max depth (cycle?)"
+        )
     out = []
     for block in blocks:
         if isinstance(block, Component):
-            out.extend(_expand_ref(block.ref, components, "component", components, sections, _depth))
+            out.extend(
+                _expand_ref(
+                    block.ref, components, "component", components, sections, _depth
+                )
+            )
         elif isinstance(block, Section):
-            out.extend(_expand_ref(block.ref, sections, "section", components, sections, _depth))
+            out.extend(
+                _expand_ref(
+                    block.ref, sections, "section", components, sections, _depth
+                )
+            )
         else:
             out.append(block)
     return out
@@ -52,7 +65,9 @@ def _expand_blocks(blocks, components, sections, *, _depth: int):
 def _expand_ref(ref, registry, kind, components, sections, depth):
     definition = registry.get(ref)
     if definition is None:
-        raise ComponentExpansionError(f"{kind} ref {ref!r} is not defined in the profile")
+        raise ComponentExpansionError(
+            f"{kind} ref {ref!r} is not defined in the profile"
+        )
     raw_blocks = definition.get("blocks")
     if not isinstance(raw_blocks, list):
         raise ComponentExpansionError(f"{kind} {ref!r} has no 'blocks' template")

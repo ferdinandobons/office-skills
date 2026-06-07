@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """DOCX role inference for the M1 vertical slice."""
+
 from __future__ import annotations
 
 from typing import Iterable, Optional
@@ -84,7 +85,12 @@ def role_usage(role_id: str) -> dict:
     """
     family, _ = schema.parse_role_id(role_id)
     if family == "cover":
-        return {"scope": "cover", "placement": "structural", "required": True, "order": 0}
+        return {
+            "scope": "cover",
+            "placement": "structural",
+            "required": True,
+            "order": 0,
+        }
     if family == "toc":
         return {"scope": "toc", "placement": "structural", "required": True, "order": 1}
     return {"scope": "body", "placement": "freeform", "required": False, "order": None}
@@ -183,15 +189,33 @@ def infer_roles(doc) -> dict:
     for level in (1, 2, 3):
         style = _find_style(paragraph_styles, f"Heading {level}")
         if style is not None:
-            add(schema.role_id("heading", level), style, 1.0, schema.Status.ROBUST.value, f"builtin Heading {level}")
+            add(
+                schema.role_id("heading", level),
+                style,
+                1.0,
+                schema.Status.ROBUST.value,
+                f"builtin Heading {level}",
+            )
 
     title = _find_style(paragraph_styles, "Title")
     if title is not None:
-        add("cover.title", title, 0.8, schema.Status.BEST_EFFORT.value, "builtin Title style")
+        add(
+            "cover.title",
+            title,
+            0.8,
+            schema.Status.BEST_EFFORT.value,
+            "builtin Title style",
+        )
 
     toc = _toc_heading_style(paragraph_styles)
     if toc is not None:
-        add("toc", toc, 0.7, schema.Status.BEST_EFFORT.value, "TOC/contents-named paragraph style")
+        add(
+            "toc",
+            toc,
+            0.7,
+            schema.Status.BEST_EFFORT.value,
+            "TOC/contents-named paragraph style",
+        )
 
     # Callout (D6). PRIMARY (structural): a paragraph style carrying a shaded /
     # bordered BOX (``w:pPr/w:shd`` and/or ``w:pBdr``) is a real callout container,
@@ -200,18 +224,27 @@ def infer_roles(doc) -> dict:
     # ``Footnote Text`` win over a real brand callout style. WEAK PRIOR (lexicon)
     # is the last-resort tiebreaker, over NON-builtin styles only.
     callout_candidates = [
-        s for s in paragraph_styles
-        if _norm_id(s) not in _BUILTIN_FOOTNOTE_ENDNOTE_IDS
+        s for s in paragraph_styles if _norm_id(s) not in _BUILTIN_FOOTNOTE_ENDNOTE_IDS
     ]
     callout = _first_boxed_style(callout_candidates)
     if callout is not None:
-        add("callout.info", callout, 0.7, schema.Status.BEST_EFFORT.value,
-            "paragraph shd/border box (structural callout signal)")
+        add(
+            "callout.info",
+            callout,
+            0.7,
+            schema.Status.BEST_EFFORT.value,
+            "paragraph shd/border box (structural callout signal)",
+        )
     else:
         callout = _best_name_token_style(callout_candidates, "callout")
         if callout is not None:
-            add("callout.info", callout, 0.62, schema.Status.BEST_EFFORT.value,
-                "name-token callout over non-builtin styles (weak prior)")
+            add(
+                "callout.info",
+                callout,
+                0.62,
+                schema.Status.BEST_EFFORT.value,
+                "name-token callout over non-builtin styles (weak prior)",
+            )
 
     caption = _find_style(paragraph_styles, "Caption")
     if caption is not None:
@@ -229,13 +262,25 @@ def infer_roles(doc) -> dict:
     # either way, so the lexicon can never widen the brand guarantee.
     custom_table = next((s for s in table_styles if _is_custom_style(s)), None)
     if custom_table is not None:
-        add("table.default", custom_table, 0.85, schema.Status.ROBUST.value,
-            "custom w:type='table' style (structural brand table)")
+        add(
+            "table.default",
+            custom_table,
+            0.85,
+            schema.Status.ROBUST.value,
+            "custom w:type='table' style (structural brand table)",
+        )
     else:
-        table = _best_name_token_style(table_styles, "table") or _find_style(table_styles, "Table Grid")
+        table = _best_name_token_style(table_styles, "table") or _find_style(
+            table_styles, "Table Grid"
+        )
         if table is not None:
-            add("table.default", table, 0.72, schema.Status.BEST_EFFORT.value,
-                "table style candidate (weak prior)")
+            add(
+                "table.default",
+                table,
+                0.72,
+                schema.Status.BEST_EFFORT.value,
+                "table style candidate (weak prior)",
+            )
 
     # List roles (D1). PRIMARY (structural): a paragraph style whose definition
     # carries a ``w:pPr/w:numPr`` references a real numbering definition; resolve
@@ -247,7 +292,13 @@ def infer_roles(doc) -> dict:
     # remains ONLY when the template has no real numbered list style at all.
     _nominate_list_styles(doc, paragraph_styles, add)
     if normal is not None and not _has_any_list_role(roles):
-        add("list.bullet.1", normal, 0.45, schema.Status.BEST_EFFORT.value, "M1 fallback list paragraph")
+        add(
+            "list.bullet.1",
+            normal,
+            0.45,
+            schema.Status.BEST_EFFORT.value,
+            "M1 fallback list paragraph",
+        )
 
     return roles
 

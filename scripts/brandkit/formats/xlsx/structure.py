@@ -29,6 +29,7 @@ author's data carried into the profile as an id, exactly as docx surfaces an
 opaque ``\\c`` seq_id) - never matched against a code-side word list. So this
 works for any workbook in any language.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -170,7 +171,9 @@ def _region_geometry(wb, sheet: str, coord: str) -> Optional[dict]:
     table_name = None
     table_role = None
     for tname, (tmin_r, tmax_r, tmin_c, tmax_c) in _table_anchor_rows(ws).items():
-        overlaps = not (max_row < tmin_r or min_row > tmax_r or max_col < tmin_c or min_col > tmax_c)
+        overlaps = not (
+            max_row < tmin_r or min_row > tmax_r or max_col < tmin_c or min_col > tmax_c
+        )
         if not overlaps:
             continue
         table_name = tname
@@ -373,7 +376,8 @@ def inventory_named_styles(wb) -> list[dict]:
         entry: dict[str, Any] = {
             "id": f"cell.style.{slugify(name).replace('-', '')}",
             "name": name,
-            "builtin": bool(getattr(style, "builtinId", None) is not None) or name == "Normal",
+            "builtin": bool(getattr(style, "builtinId", None) is not None)
+            or name == "Normal",
         }
         if not isinstance(style, str):
             nf = getattr(style, "number_format", None)
@@ -390,7 +394,9 @@ def inventory_named_styles(wb) -> list[dict]:
                     "color": color if isinstance(color, str) else None,
                 }
             fill = getattr(style, "fill", None)
-            entry["has_fill"] = bool(fill is not None and getattr(fill, "patternType", None))
+            entry["has_fill"] = bool(
+                fill is not None and getattr(fill, "patternType", None)
+            )
             border = getattr(style, "border", None)
             entry["has_border"] = bool(
                 border is not None
@@ -427,7 +433,9 @@ def inventory_table_styles(wb) -> list[dict]:
         for tbl in tables:
             ref = getattr(tbl, "ref", None)
             entry: dict[str, Any] = {
-                "name": str(getattr(tbl, "displayName", "") or getattr(tbl, "name", "")),
+                "name": str(
+                    getattr(tbl, "displayName", "") or getattr(tbl, "name", "")
+                ),
                 "sheet": sheet,
                 "ref": str(ref) if ref else None,
             }
@@ -435,8 +443,12 @@ def inventory_table_styles(wb) -> list[dict]:
             if info is not None:
                 entry["style"] = getattr(info, "name", None)
                 entry["show_row_stripes"] = bool(getattr(info, "showRowStripes", False))
-                entry["show_col_stripes"] = bool(getattr(info, "showColumnStripes", False))
-                entry["show_first_column"] = bool(getattr(info, "showFirstColumn", False))
+                entry["show_col_stripes"] = bool(
+                    getattr(info, "showColumnStripes", False)
+                )
+                entry["show_first_column"] = bool(
+                    getattr(info, "showFirstColumn", False)
+                )
                 entry["show_last_column"] = bool(getattr(info, "showLastColumn", False))
             out.append(entry)
     out.sort(key=lambda e: (e["sheet"], e["name"]))

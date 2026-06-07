@@ -13,6 +13,7 @@ Covers:
   parser (no external-entity resolution) and ``_extract_theme`` no longer
   blanket-swallows a real parse error.
 """
+
 from __future__ import annotations
 
 import io
@@ -143,8 +144,11 @@ class ProvenanceDriftTest(unittest.TestCase):
 
             self.assertFalse(report.passed)
             self.assertTrue(
-                any(f.check == "shell_provenance" and f.severity == schema.Severity.ERROR.value
-                    for f in report.findings)
+                any(
+                    f.check == "shell_provenance"
+                    and f.severity == schema.Severity.ERROR.value
+                    for f in report.findings
+                )
             )
 
 
@@ -214,7 +218,9 @@ class ZipSlipTest(unittest.TestCase):
             dest = root / "dest"
             pack.unpack(src, dest)
             self.assertTrue((dest / "word" / "document.xml").is_file())
-            self.assertEqual((dest / "word" / "document.xml").read_bytes(), b"<document/>")
+            self.assertEqual(
+                (dest / "word" / "document.xml").read_bytes(), b"<document/>"
+            )
 
 
 # ---------------------------------------------------------------------------

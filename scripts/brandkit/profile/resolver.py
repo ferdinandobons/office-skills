@@ -22,6 +22,7 @@ docx profile) is *never* emitted. The model proposes; the validator (here +
 It performs no I/O and contains no brand literals; all concrete names and ids
 come from the profile.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -89,12 +90,16 @@ class ProfileResolver:
         # The resolver types this profile's kind is allowed to emit. An unknown
         # kind yields an empty set, so every concrete resolver is treated as
         # foreign (fail-closed) rather than blindly trusted.
-        self._legal_types: frozenset[str] = schema.LEGAL_RESOLVER_TYPES.get(
-            self.kind, frozenset()
-        ) if self.kind else frozenset()
+        self._legal_types: frozenset[str] = (
+            schema.LEGAL_RESOLVER_TYPES.get(self.kind, frozenset())
+            if self.kind
+            else frozenset()
+        )
 
     # -- the single kind-aware resolution entry point -----------------------
-    def resolve_role(self, role_id: str, *, fallback: Optional[str] = "paragraph") -> ResolvedOp:
+    def resolve_role(
+        self, role_id: str, *, fallback: Optional[str] = "paragraph"
+    ) -> ResolvedOp:
         """Resolve ``role_id`` to its kind-appropriate :class:`ResolvedOp`.
 
         This is the spine both pptx and xlsx generators call. Resolution is the
@@ -157,23 +162,35 @@ class ProfileResolver:
         brand guarantee.
         """
         if isinstance(block, ir.Heading):
-            return self.resolve_role(schema.role_id("heading", block.level), fallback="paragraph")
+            return self.resolve_role(
+                schema.role_id("heading", block.level), fallback="paragraph"
+            )
         if isinstance(block, ir.Paragraph):
-            fallback = schema.role_id("paragraph", block.variant) if block.variant else "paragraph"
+            fallback = (
+                schema.role_id("paragraph", block.variant)
+                if block.variant
+                else "paragraph"
+            )
             return self.resolve_role(fallback, fallback="paragraph")
         if isinstance(block, ir.Callout):
-            return self.resolve_role(schema.role_id("callout", block.intent), fallback="paragraph")
+            return self.resolve_role(
+                schema.role_id("callout", block.intent), fallback="paragraph"
+            )
         if isinstance(block, ir.ListBlock):
             return self.resolve_list_item(block, None)
         if isinstance(block, ir.Table):
-            return self.resolve_role(schema.role_id("table", block.role or "default"), fallback=None)
+            return self.resolve_role(
+                schema.role_id("table", block.role or "default"), fallback=None
+            )
         if isinstance(block, ir.Caption):
             return self.resolve_role("caption", fallback="paragraph")
         if isinstance(block, ir.Quote):
             return self.resolve_role("quote", fallback="paragraph")
         return self.resolve_role("paragraph", fallback="paragraph")
 
-    def resolve_list_item(self, block: ir.ListBlock, item: Optional[ir.ListItem]) -> ResolvedOp:
+    def resolve_list_item(
+        self, block: ir.ListBlock, item: Optional[ir.ListItem]
+    ) -> ResolvedOp:
         """Resolve the list role for one item, honoring its nesting ``level``.
 
         The list family (bullet/number) comes from the block; the *level* comes

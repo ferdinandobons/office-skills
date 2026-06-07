@@ -15,6 +15,7 @@ Covers the confirmed findings:
 
 All decks are synthesized in a temp dir with python-pptx and never committed.
 """
+
 from __future__ import annotations
 
 import sys
@@ -80,7 +81,10 @@ def _extract_profile(template: Path, name: str = "deck") -> dict:
         roles=roles,
         surface={
             "pptx": {
-                "slide_size_emu": {"w": int(prs.slide_width), "h": int(prs.slide_height)},
+                "slide_size_emu": {
+                    "w": int(prs.slide_width),
+                    "h": int(prs.slide_height),
+                },
                 "layouts": layouts,
                 "safe_area_emu": {"l": 457200, "t": 457200, "r": 457200, "b": 457200},
             }
@@ -173,7 +177,9 @@ class C3RolesFromRealLayouts(unittest.TestCase):
                 if layout is None:
                     continue
                 idxs = {ph["idx"] for ph in layouts[layout]["placeholders"]}
-                self.assertIn(ph_idx, idxs, f"{rid}: ph_idx {ph_idx} absent from {layout}")
+                self.assertIn(
+                    ph_idx, idxs, f"{rid}: ph_idx {ph_idx} absent from {layout}"
+                )
 
     def test_honest_stub_when_no_suitable_layout(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -196,7 +202,10 @@ class C3RolesFromRealLayouts(unittest.TestCase):
         # present for a deck with a cover layout, absent for a placeholder-less one.
         import json
 
-        for builder, expect_present in ((_branded_template, True), (_placeholderless_template, False)):
+        for builder, expect_present in (
+            (_branded_template, True),
+            (_placeholderless_template, False),
+        ):
             with tempfile.TemporaryDirectory() as td:
                 tp = Path(td)
                 template = tp / "tpl.pptx"
@@ -212,7 +221,9 @@ class C3RolesFromRealLayouts(unittest.TestCase):
                     # the real placeholder count and a title-family anchor is present.
                     self.assertGreaterEqual(cover["slots_found"], 1)
                     self.assertEqual(cover["slots_found"], len(anchors))
-                    self.assertTrue(any(a.get("family") == "title" for a in anchors), anchors)
+                    self.assertTrue(
+                        any(a.get("family") == "title" for a in anchors), anchors
+                    )
                     self.assertEqual(cover["kind"], schema.AnchorKind.PLACEHOLDER.value)
                 else:
                     self.assertEqual(cover["slots_found"], 0)
@@ -274,7 +285,11 @@ class M6M7GenerateFromRealLayouts(unittest.TestCase):
                 },
                 out,
             )
-            titles = [s.shapes.title.text for s in res.slides if s.shapes.title and s.shapes.title.text]
+            titles = [
+                s.shapes.title.text
+                for s in res.slides
+                if s.shapes.title and s.shapes.title.text
+            ]
             # Both headings are their OWN slide titles (not "Section A (2)").
             self.assertIn("Section A", titles)
             self.assertIn("Section B", titles)
@@ -310,9 +325,23 @@ class M6M7GenerateFromRealLayouts(unittest.TestCase):
                 {
                     "blocks": [
                         {"type": "heading", "level": 1, "text": "Mixed"},
-                        {"type": "list", "items": [{"text": "first bullet"}, {"text": "second bullet"}]},
-                        {"type": "table", "columns": ["Area", "Status"], "rows": [["Pipeline", "Healthy"]]},
-                        {"type": "quote", "text": "A pithy remark.", "attribution": "Anon"},
+                        {
+                            "type": "list",
+                            "items": [
+                                {"text": "first bullet"},
+                                {"text": "second bullet"},
+                            ],
+                        },
+                        {
+                            "type": "table",
+                            "columns": ["Area", "Status"],
+                            "rows": [["Pipeline", "Healthy"]],
+                        },
+                        {
+                            "type": "quote",
+                            "text": "A pithy remark.",
+                            "attribution": "Anon",
+                        },
                         {"type": "caption", "text": "Figure 1. A caption."},
                         {"type": "callout", "intent": "info", "text": "Mind the gap."},
                     ]
@@ -352,7 +381,9 @@ class M6M7GenerateFromRealLayouts(unittest.TestCase):
             # cover + at least two content slides for the over-capacity paragraph.
             self.assertGreaterEqual(len(res.slides), 3)
             content_titles = [
-                s.shapes.title.text for s in res.slides if s.shapes.title and s.shapes.title.text
+                s.shapes.title.text
+                for s in res.slides
+                if s.shapes.title and s.shapes.title.text
             ]
             # The continuation slide carries the SAME section title (suffixed).
             self.assertIn("Long Section", content_titles)
@@ -369,7 +400,9 @@ class M6M7GenerateFromRealLayouts(unittest.TestCase):
                 {"blocks": [{"type": "heading", "level": 1, "text": "Only Content"}]},
                 out,
             )
-            self.assertTrue(all(s.slide_layout.name != "BrandCover" for s in res.slides))
+            self.assertTrue(
+                all(s.slide_layout.name != "BrandCover" for s in res.slides)
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -423,15 +456,17 @@ def _reconcile_deck(path: Path) -> str:
             body_prompt = ph.text.strip()
             break
 
-    prs.slides.add_slide(prs.slide_layouts[0])             # 0: cover (prompts only)
-    sa = prs.slides.add_slide(content_layout)              # 1: agenda (NON-English)
+    prs.slides.add_slide(prs.slide_layouts[0])  # 0: cover (prompts only)
+    sa = prs.slides.add_slide(content_layout)  # 1: agenda (NON-English)
     sa.shapes.title.text = "Sommario"
     pg._first_body_placeholder(sa).text = "Intro\nBody"
-    s2 = prs.slides.add_slide(content_layout)              # 2: structural (authored)
+    s2 = prs.slides.add_slide(content_layout)  # 2: structural (authored)
     s2.shapes.title.text = "Real Structural Slide"
     pg._first_body_placeholder(s2).text = "Authored content that must be preserved."
-    s3 = prs.slides.add_slide(content_layout)              # 3: demo (prompts only)
-    s3.shapes.title.text = content_layout.placeholders[0].text.strip() or "Click to edit"
+    s3 = prs.slides.add_slide(content_layout)  # 3: demo (prompts only)
+    s3.shapes.title.text = (
+        content_layout.placeholders[0].text.strip() or "Click to edit"
+    )
     if body_prompt:
         pg._first_body_placeholder(s3).text = body_prompt
 
@@ -457,7 +492,11 @@ def _present_comp(prof: dict, comp: dict, *, confidence: float = 0.9) -> None:
 
 
 def _titles(prs) -> list[str]:
-    return [s.shapes.title.text for s in prs.slides if s.shapes.title and s.shapes.title.text]
+    return [
+        s.shapes.title.text
+        for s in prs.slides
+        if s.shapes.title and s.shapes.title.text
+    ]
 
 
 class MI7FactEnrichmentTest(unittest.TestCase):
@@ -532,23 +571,43 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
                 ir.Heading(level=1, runs=[{"t": "New Section Two"}]),
                 ir.Paragraph(runs=[{"t": "More fresh body."}]),
             ],
-            cover=ir.Cover(title=[{"t": "Recon Title"}], subtitle=[{"t": "Recon Subtitle"}]),
+            cover=ir.Cover(
+                title=[{"t": "Recon Title"}], subtitle=[{"t": "Recon Subtitle"}]
+            ),
         )
 
     def _comp_for(self, prof: dict, *, demo_slide_ref: str = "region.slide.3") -> dict:
         anchors = prof["surface"]["pptx"]["cover_anchors"]
         title_anchor = next(a["id"] for a in anchors if a["family"] == "title")
         sub_anchor = next((a["id"] for a in anchors if a["family"] == "subtitle"), None)
-        slots = {title_anchor: {"binds_to": "title", "fill_rule": "in_place", "demo_value": ""}}
+        slots = {
+            title_anchor: {
+                "binds_to": "title",
+                "fill_rule": "in_place",
+                "demo_value": "",
+            }
+        }
         if sub_anchor:
-            slots[sub_anchor] = {"binds_to": "subtitle", "fill_rule": "in_place", "demo_value": ""}
+            slots[sub_anchor] = {
+                "binds_to": "subtitle",
+                "fill_rule": "in_place",
+                "demo_value": "",
+            }
         return {
             "cover_slots": slots,
             "conventions": {
-                "indexes": [{"index_ref": "field.sections", "reconcile": "regenerate", "seq_id": None}],
+                "indexes": [
+                    {
+                        "index_ref": "field.sections",
+                        "reconcile": "regenerate",
+                        "seq_id": None,
+                    }
+                ],
                 "sections": [],
             },
-            "demo_classification": {"regions": [{"region_ref": demo_slide_ref, "verdict": "demo"}]},
+            "demo_classification": {
+                "regions": [{"region_ref": demo_slide_ref, "verdict": "demo"}]
+            },
         }
 
     def test_keeps_structural_clears_demo_fills_cover_regens_agenda(self) -> None:
@@ -572,7 +631,9 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
             )
 
             # Cover filled IN PLACE on the cover layout (not recreated, no duplicate).
-            cover_slides = [s for s in res.slides if s.slide_layout.name == "BrandCover"]
+            cover_slides = [
+                s for s in res.slides if s.slide_layout.name == "BrandCover"
+            ]
             self.assertEqual(len(cover_slides), 1)
             self.assertEqual(cover_slides[0].shapes.title.text, "Recon Title")
             self.assertEqual(titles.count("Recon Title"), 1)
@@ -600,7 +661,8 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
             sommario_bodies = [
                 pg._first_body_placeholder(s).text.strip()
                 for s in res.slides
-                if s.shapes.title and s.shapes.title.text == "Sommario"
+                if s.shapes.title
+                and s.shapes.title.text == "Sommario"
                 and pg._first_body_placeholder(s) is not None
             ]
             self.assertEqual(sommario_bodies, ["New Section One\nNew Section Two"])
@@ -631,7 +693,10 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
             self.assertIn("Real Structural Slide", _titles(res))
             self.assertTrue(any(f.check == "demo_clear_downgraded" for f in findings))
             self.assertFalse(
-                any(f.check == "no_net_structure_loss" and f.severity == "ERROR" for f in findings)
+                any(
+                    f.check == "no_net_structure_loss" and f.severity == "ERROR"
+                    for f in findings
+                )
             )
 
     def test_generate_twice_is_idempotent(self) -> None:
@@ -653,7 +718,9 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
                     (
                         s.slide_layout.name,
                         s.shapes.title.text if s.shapes.title else "",
-                        pg._first_body_placeholder(s).text if pg._first_body_placeholder(s) else "",
+                        pg._first_body_placeholder(s).text
+                        if pg._first_body_placeholder(s)
+                        else "",
                     )
                     for s in r.slides
                 ]
@@ -677,16 +744,25 @@ class MI7ReconcileNotRebuildTest(unittest.TestCase):
             prof = _extract_on_disk(template, tp)
             anchors = prof["surface"]["pptx"]["cover_anchors"]
             title_anchor = next(a["id"] for a in anchors if a["family"] == "title")
-            _present_comp(prof, {
-                "cover_slots": {
-                    title_anchor: {"binds_to": "title", "fill_rule": "in_place", "demo_value": ""}
-                }
-            })
+            _present_comp(
+                prof,
+                {
+                    "cover_slots": {
+                        title_anchor: {
+                            "binds_to": "title",
+                            "fill_rule": "in_place",
+                            "demo_value": "",
+                        }
+                    }
+                },
+            )
             out = tp / "out.pptx"
             findings: list[Finding] = []
             pg.generate(prof, template, self._idoc(), out, findings=findings)
             res = Presentation(out)
-            cover_slides = [s for s in res.slides if s.slide_layout.name == "BrandCover"]
+            cover_slides = [
+                s for s in res.slides if s.slide_layout.name == "BrandCover"
+            ]
             self.assertEqual(len(cover_slides), 1)
             self.assertEqual(cover_slides[0].shapes.title.text, "Recon Title")
             self.assertNotIn("OLD COVER TITLE", _titles(res))
@@ -721,15 +797,17 @@ class MI7CliFindingsWiringTest(unittest.TestCase):
     def _idoc_json(self, tmp: Path) -> Path:
         p = tmp / "idoc.json"
         p.write_text(
-            json.dumps({
-                "cover": {"title": "Recon Title", "subtitle": "Recon Subtitle"},
-                "blocks": [
-                    {"type": "heading", "level": 1, "text": "New Section One"},
-                    {"type": "paragraph", "text": "Fresh body text."},
-                    {"type": "heading", "level": 1, "text": "New Section Two"},
-                    {"type": "paragraph", "text": "More fresh body."},
-                ],
-            }),
+            json.dumps(
+                {
+                    "cover": {"title": "Recon Title", "subtitle": "Recon Subtitle"},
+                    "blocks": [
+                        {"type": "heading", "level": 1, "text": "New Section One"},
+                        {"type": "paragraph", "text": "Fresh body text."},
+                        {"type": "heading", "level": 1, "text": "New Section Two"},
+                        {"type": "paragraph", "text": "More fresh body."},
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         return p
@@ -749,23 +827,58 @@ class MI7CliFindingsWiringTest(unittest.TestCase):
         os.chdir(tmp)
         try:
             self.assertEqual(
-                main(["extract", "--name", "deck", "--template", str(template), "--scope", "project"]), 0
+                main(
+                    [
+                        "extract",
+                        "--name",
+                        "deck",
+                        "--template",
+                        str(template),
+                        "--scope",
+                        "project",
+                    ]
+                ),
+                0,
             )
             prof_path = tmp / "brand-kit" / "deck" / "profile.json"
             prof = json.loads(prof_path.read_text())
-            comp = MI7ReconcileNotRebuildTest()._comp_for(prof, demo_slide_ref=demo_slide_ref)
+            comp = MI7ReconcileNotRebuildTest()._comp_for(
+                prof, demo_slide_ref=demo_slide_ref
+            )
             comp_path = tmp / "comp.json"
             comp_path.write_text(json.dumps(comp), encoding="utf-8")
             self.assertEqual(
-                main(["comprehend", "--name", "deck", "--input", str(comp_path), "--scope", "project"]), 0
+                main(
+                    [
+                        "comprehend",
+                        "--name",
+                        "deck",
+                        "--input",
+                        str(comp_path),
+                        "--scope",
+                        "project",
+                    ]
+                ),
+                0,
             )
             out = tmp / "out.pptx"
             buf = io.StringIO()
             with redirect_stdout(buf):
-                rc = main([
-                    "generate", "--name", "deck", "--input", str(self._idoc_json(tmp)),
-                    "--output", str(out), "--scope", "project", "--qa", "fast",
-                ])
+                rc = main(
+                    [
+                        "generate",
+                        "--name",
+                        "deck",
+                        "--input",
+                        str(self._idoc_json(tmp)),
+                        "--output",
+                        str(out),
+                        "--scope",
+                        "project",
+                        "--qa",
+                        "fast",
+                    ]
+                )
             return rc, buf.getvalue(), out
         finally:
             os.chdir(old)
@@ -776,7 +889,9 @@ class MI7CliFindingsWiringTest(unittest.TestCase):
         # the run must still PASS (rc 0). Before the wiring fix these were dropped.
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
-            rc, stdout, out = self._run_cli_reconcile(tp, demo_slide_ref="region.slide.3")
+            rc, stdout, out = self._run_cli_reconcile(
+                tp, demo_slide_ref="region.slide.3"
+            )
             self.assertEqual(rc, 0, stdout)
             self.assertTrue(out.is_file())
             # The agenda-regenerated INFO finding (emitted ONLY on the reconcile path)
@@ -789,7 +904,9 @@ class MI7CliFindingsWiringTest(unittest.TestCase):
         # WARNING must reach the CLI report (it is silently dropped without the fix).
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
-            rc, stdout, out = self._run_cli_reconcile(tp, demo_slide_ref="region.slide.1")
+            rc, stdout, out = self._run_cli_reconcile(
+                tp, demo_slide_ref="region.slide.1"
+            )
             # No corroborated removal -> still passes, but the WARNING is surfaced.
             self.assertEqual(rc, 0, stdout)
             self.assertIn("demo_clear_downgraded", stdout)
@@ -824,14 +941,21 @@ class MI7SharedResolverTest(unittest.TestCase):
             _branded_template(template)
             prof = _extract_on_disk(template, tp)
             prof["roles"]["cover.title"]["resolver"] = {
-                "type": "named_style", "style_id": "Title"
+                "type": "named_style",
+                "style_id": "Title",
             }
             prs = Presentation(template)
             resolver = ProfileResolver(prof)
             self.assertIsNone(pg._layout_for_role(prs, resolver, "cover.title"))
 
 
-_COMPLEX_PPTX = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "complex" / "acme_complex.pptx"
+_COMPLEX_PPTX = (
+    Path(__file__).resolve().parents[1]
+    / "tests"
+    / "fixtures"
+    / "complex"
+    / "acme_complex.pptx"
+)
 
 
 class PptxCheapFidelityTest(unittest.TestCase):
@@ -845,7 +969,9 @@ class PptxCheapFidelityTest(unittest.TestCase):
         _branded_template(template)
         return template
 
-    def _gen(self, template: Path, idoc: ir.IntermediateDocument, out: Path, findings=None):
+    def _gen(
+        self, template: Path, idoc: ir.IntermediateDocument, out: Path, findings=None
+    ):
         profile = _extract_profile(template)
         pg.generate(profile, template, idoc, out, findings=findings)
         return Presentation(out)
@@ -856,19 +982,30 @@ class PptxCheapFidelityTest(unittest.TestCase):
             tp = Path(td)
             template = self._branded(tp)
             out = tp / "out.pptx"
-            idoc = ir.IntermediateDocument(blocks=[
-                ir.Heading(level=1, runs=[{"t": "Topics"}]),
-                ir.ListBlock(items=[
-                    ir.ListItem(runs=[{"t": "Topic A"}], level=0, items=[
-                        ir.ListItem(runs=[{"t": "Sub A1"}], level=1),
-                    ]),
-                    ir.ListItem(runs=[{"t": "Topic B"}], level=0),
-                ]),
-            ])
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Heading(level=1, runs=[{"t": "Topics"}]),
+                    ir.ListBlock(
+                        items=[
+                            ir.ListItem(
+                                runs=[{"t": "Topic A"}],
+                                level=0,
+                                items=[
+                                    ir.ListItem(runs=[{"t": "Sub A1"}], level=1),
+                                ],
+                            ),
+                            ir.ListItem(runs=[{"t": "Topic B"}], level=0),
+                        ]
+                    ),
+                ]
+            )
             res = self._gen(template, idoc, out)
             topic_slide = next(
-                s for s in res.slides
-                if s.shapes.title and s.shapes.title.text and s.shapes.title.text.startswith("Topics")
+                s
+                for s in res.slides
+                if s.shapes.title
+                and s.shapes.title.text
+                and s.shapes.title.text.startswith("Topics")
             )
             body = pg._first_body_placeholder(topic_slide)
             paras = [(p.text, p.level) for p in body.text_frame.paragraphs]
@@ -887,10 +1024,13 @@ class PptxCheapFidelityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
             prof = _extract_on_disk(_COMPLEX_PPTX, tp, name="acme")
-            idoc = ir.IntermediateDocument(blocks=[
-                ir.Heading(level=1, runs=[{"t": "Update"}]),
-                ir.Paragraph(runs=[{"t": "Body text."}]),
-            ], cover=ir.Cover(title=[{"t": "Cover"}]))
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Heading(level=1, runs=[{"t": "Update"}]),
+                    ir.Paragraph(runs=[{"t": "Body text."}]),
+                ],
+                cover=ir.Cover(title=[{"t": "Cover"}]),
+            )
             o1 = tp / "o1.pptx"
             o2 = tp / "o2.pptx"
             pg.generate(prof, _COMPLEX_PPTX, idoc, o1)
@@ -926,11 +1066,20 @@ class PptxCheapFidelityTest(unittest.TestCase):
             tp = Path(td)
             template = self._branded(tp)
             out = tp / "out.pptx"
-            idoc = ir.IntermediateDocument(blocks=[
-                ir.Heading(level=1, runs=[{"t": "Data"}]),
-                ir.Table(columns=[{"t": "Region"}, {"t": "Rev"}],
-                         rows=[[ir.TableCell(runs=[{"t": "North"}]), ir.TableCell(runs=[{"t": "100"}])]]),
-            ])
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Heading(level=1, runs=[{"t": "Data"}]),
+                    ir.Table(
+                        columns=[{"t": "Region"}, {"t": "Rev"}],
+                        rows=[
+                            [
+                                ir.TableCell(runs=[{"t": "North"}]),
+                                ir.TableCell(runs=[{"t": "100"}]),
+                            ]
+                        ],
+                    ),
+                ]
+            )
             findings: list[Finding] = []
             prs = self._gen(template, idoc, out, findings=findings)
             tables = [
@@ -949,16 +1098,26 @@ class PptxCheapFidelityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
             prof = _extract_on_disk(_COMPLEX_PPTX, tp, name="acme")
-            idoc = ir.IntermediateDocument(blocks=[
-                ir.Heading(level=1, runs=[{"t": "Data"}]),
-                ir.Table(columns=[{"t": "Region"}, {"t": "Rev"}],
-                         rows=[[ir.TableCell(runs=[{"t": "North"}]), ir.TableCell(runs=[{"t": "100"}])]]),
-            ])
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Heading(level=1, runs=[{"t": "Data"}]),
+                    ir.Table(
+                        columns=[{"t": "Region"}, {"t": "Rev"}],
+                        rows=[
+                            [
+                                ir.TableCell(runs=[{"t": "North"}]),
+                                ir.TableCell(runs=[{"t": "100"}]),
+                            ]
+                        ],
+                    ),
+                ]
+            )
             out = tp / "out.pptx"
             findings: list[Finding] = []
             pg.generate(prof, _COMPLEX_PPTX, idoc, out, findings=findings)
             table_survival = [
-                f for f in findings
+                f
+                for f in findings
                 if f.check == "component_survival" and "native table" in f.message
             ]
             self.assertEqual(table_survival, [])
@@ -970,18 +1129,24 @@ class PptxCheapFidelityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             tp = Path(td)
             prof = _extract_on_disk(_COMPLEX_PPTX, tp, name="acme")
-            idoc = ir.IntermediateDocument(blocks=[
-                ir.Heading(level=1, runs=[{"t": "Text only"}]),
-                ir.Paragraph(runs=[{"t": "No native components here."}]),
-            ])
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Heading(level=1, runs=[{"t": "Text only"}]),
+                    ir.Paragraph(runs=[{"t": "No native components here."}]),
+                ]
+            )
             out = tp / "out.pptx"
             findings: list[Finding] = []
             pg.generate(prof, _COMPLEX_PPTX, idoc, out, findings=findings)
             survival = {f.check for f in findings if f.check == "component_survival"}
             self.assertIn("component_survival", survival)
-            self.assertTrue(all(
-                f.severity == "WARNING" for f in findings if f.check == "component_survival"
-            ))
+            self.assertTrue(
+                all(
+                    f.severity == "WARNING"
+                    for f in findings
+                    if f.check == "component_survival"
+                )
+            )
 
     # P4 - filled cover placeholder keeps its run formatting (rPr re-assertion) ----
     def test_cover_fill_preserves_run_formatting(self) -> None:

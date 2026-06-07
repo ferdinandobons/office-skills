@@ -9,9 +9,9 @@ into the repo). The range names used as grid keys / surfaced ids ("title_cell",
 extractor never matches on them as code-side literals (that is exactly what
 M-i-6 de-literalized).
 """
+
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
@@ -26,7 +26,6 @@ from openpyxl.worksheet.table import Table
 
 from brandkit.formats.xlsx import extract as xlsx_extract
 from brandkit.formats.xlsx import generate as xlsx_generate
-from brandkit.formats.xlsx import structure as xlsx_structure
 from brandkit.grid.model import GridDocument
 from brandkit.profile import comprehension as comp
 from brandkit.profile import store
@@ -62,7 +61,9 @@ def _workbook(
     if with_table:
         ws.add_table(Table(displayName="DataTbl", ref=f"A3:B{last_data_row}"))
     wb.defined_names.add(DefinedName("title_cell", attr_text=f"'Report'!{title_range}"))
-    wb.defined_names.add(DefinedName("data_region", attr_text=f"'Report'!$A$4:$B${last_data_row}"))
+    wb.defined_names.add(
+        DefinedName("data_region", attr_text=f"'Report'!$A$4:$B${last_data_row}")
+    )
     wb.save(path)
 
 
@@ -88,11 +89,15 @@ class XlsxGeometryInventory(unittest.TestCase):
             self.assertEqual(anchors["title_cell"]["demo_value"], "{{title}}")
             # No privileged "title" role: a generic named_range role keyed by slug.
             self.assertNotIn("title", prof["roles"])
-            self.assertEqual(prof["roles"]["region.titlecell"]["resolver"]["name"], "title_cell")
+            self.assertEqual(
+                prof["roles"]["region.titlecell"]["resolver"]["name"], "title_cell"
+            )
 
     def test_merged_header_and_frozen_band_detected(self) -> None:
         with tempfile.TemporaryDirectory() as t:
-            prof = self._extract(Path(t), title_range="$A$1:$C$1", merged_title=True, freeze="A4")
+            prof = self._extract(
+                Path(t), title_range="$A$1:$C$1", merged_title=True, freeze="A4"
+            )
             anchors = {a["name"]: a for a in prof["surface"]["xlsx"]["cover_anchors"]}
             title = anchors["title_cell"]
             self.assertEqual(title["cardinality"], "multi_cell")
@@ -170,7 +175,11 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
         return comp.merge(
             profile,
             block,
-            generated_by={"model": "test", "prompt_version": "v1", "generated_at": "2026-01-01T00:00:00Z"},
+            generated_by={
+                "model": "test",
+                "prompt_version": "v1",
+                "generated_at": "2026-01-01T00:00:00Z",
+            },
         )
 
     def test_demo_clear_and_formula_preserved(self) -> None:
@@ -182,23 +191,41 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
                 prof,
                 {
                     "cover_slots": {
-                        "anchor.titlecell": {"semantic_role": "title", "binds_to": "title", "fill_rule": "in_place"}
+                        "anchor.titlecell": {
+                            "semantic_role": "title",
+                            "binds_to": "title",
+                            "fill_rule": "in_place",
+                        }
                     },
                     "demo_classification": {
-                        "regions": [{"region_ref": "region.dataregion", "verdict": "demo", "evidence": "sample rows"}]
+                        "regions": [
+                            {
+                                "region_ref": "region.dataregion",
+                                "verdict": "demo",
+                                "evidence": "sample rows",
+                            }
+                        ]
                     },
                 },
             )
             self.assertTrue(res.ok, res.problems)
             self.assertTrue(store.comprehension_is_present(prof))
 
-            grid = GridDocument(cells={"title_cell": "Quarterly Model"}, regions={"data_region": [["Pipeline", 42]]})
+            grid = GridDocument(
+                cells={"title_cell": "Quarterly Model"},
+                regions={"data_region": [["Pipeline", 42]]},
+            )
             findings: list = []
             out = td / "out.xlsx"
-            xlsx_generate.generate(prof, loaded.shell_path, grid, out, findings=findings)
+            xlsx_generate.generate(
+                prof, loaded.shell_path, grid, out, findings=findings
+            )
 
             # No destructive-floor ERROR: the demo clear is corroborated by verdict.
-            self.assertFalse([f for f in findings if f.severity == "ERROR"], [f.message for f in findings])
+            self.assertFalse(
+                [f for f in findings if f.severity == "ERROR"],
+                [f.message for f in findings],
+            )
 
             wb = load_workbook(out, data_only=False)
             ws = wb["Report"]
@@ -222,10 +249,16 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
                 prof,
                 {
                     "cover_slots": {"anchor.titlecell": {"fill_rule": "in_place"}},
-                    "demo_classification": {"regions": [{"region_ref": "region.dataregion", "verdict": "demo"}]},
+                    "demo_classification": {
+                        "regions": [
+                            {"region_ref": "region.dataregion", "verdict": "demo"}
+                        ]
+                    },
                 },
             )
-            grid = GridDocument(cells={"title_cell": "Q"}, regions={"data_region": [["Pipeline", 42]]})
+            grid = GridDocument(
+                cells={"title_cell": "Q"}, regions={"data_region": [["Pipeline", 42]]}
+            )
             a = td / "a.xlsx"
             b = td / "b.xlsx"
             xlsx_generate.generate(prof, loaded.shell_path, grid, a)
@@ -245,10 +278,17 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
             grid = GridDocument()  # nothing filled; the anchor is just cleared
             findings: list = []
             out = td / "out.xlsx"
-            xlsx_generate.generate(prof, loaded.shell_path, grid, out, findings=findings)
-            self.assertFalse([f for f in findings if f.severity == "ERROR"], [f.message for f in findings])
+            xlsx_generate.generate(
+                prof, loaded.shell_path, grid, out, findings=findings
+            )
+            self.assertFalse(
+                [f for f in findings if f.severity == "ERROR"],
+                [f.message for f in findings],
+            )
             ws = load_workbook(out, data_only=False)["Report"]
-            self.assertIsNone(ws["A1"].value)  # placeholder cleared, not left as {{title}}
+            self.assertIsNone(
+                ws["A1"].value
+            )  # placeholder cleared, not left as {{title}}
 
     def test_absent_comprehension_uses_deterministic_path(self) -> None:
         with tempfile.TemporaryDirectory() as t:
@@ -256,7 +296,9 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
             loaded = self._extract_profile(td, data_rows=2)
             prof = loaded.profile  # no comprehend() call -> status absent
             self.assertFalse(store.comprehension_is_present(prof))
-            grid = GridDocument(cells={"title_cell": "Q"}, regions={"data_region": [["Pipeline", 42]]})
+            grid = GridDocument(
+                cells={"title_cell": "Q"}, regions={"data_region": [["Pipeline", 42]]}
+            )
             out = td / "out.xlsx"
             xlsx_generate.generate(prof, loaded.shell_path, grid, out)
             ws = load_workbook(out, data_only=False)["Report"]
@@ -271,7 +313,9 @@ class XlsxComprehensionReconciliation(unittest.TestCase):
             loaded = self._extract_profile(td)
             grid = GridDocument(cells={"not_a_region": "x"})
             with self.assertRaises(ValueError):
-                xlsx_generate.generate(loaded.profile, loaded.shell_path, grid, td / "out.xlsx")
+                xlsx_generate.generate(
+                    loaded.profile, loaded.shell_path, grid, td / "out.xlsx"
+                )
 
 
 class XlsxResolverRouting(unittest.TestCase):
@@ -292,7 +336,9 @@ class XlsxResolverRouting(unittest.TestCase):
             # Corrupt the raw surface map so a generator that read it directly would
             # write to the wrong place; the resolver-routed path must still resolve
             # the role's named_range and fill the right cell (A1).
-            loaded.profile["surface"]["xlsx"]["named_regions"]["title_cell"]["range"] = "$A$1"
+            loaded.profile["surface"]["xlsx"]["named_regions"]["title_cell"][
+                "range"
+            ] = "$A$1"
             grid = GridDocument(cells={"title_cell": "Routed"})
             out = td / "out.xlsx"
             xlsx_generate.generate(loaded.profile, loaded.shell_path, grid, out)

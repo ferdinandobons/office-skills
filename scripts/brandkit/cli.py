@@ -54,7 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     # the ONLY writer of the comprehension block.
     p = sub.add_parser("comprehend")
     p.add_argument("--name", required=True)
-    p.add_argument("--input", required=True, help="path to the model-authored comprehension.json")
+    p.add_argument(
+        "--input", required=True, help="path to the model-authored comprehension.json"
+    )
     p.add_argument("--scope", default="auto", choices=("auto", "project", "global"))
 
     p = sub.add_parser("list")
@@ -78,16 +80,24 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raise SystemExit("supported templates: .docx, .pptx, .xlsx")
         loaded = store.load_profile(args.name, args.scope)
-        report = run_qa(None, loaded.profile, mode="verify", qa="fast", shell=loaded.shell_path)
+        report = run_qa(
+            None, loaded.profile, mode="verify", qa="fast", shell=loaded.shell_path
+        )
         loaded.profile["verification"]["status"] = report.verdict
-        loaded.profile["verification"]["roles_total"] = len(schema.list_role_ids(loaded.profile))
-        loaded.profile["verification"]["roles_verified"] = loaded.profile["verification"]["roles_total"]
+        loaded.profile["verification"]["roles_total"] = len(
+            schema.list_role_ids(loaded.profile)
+        )
+        loaded.profile["verification"]["roles_verified"] = loaded.profile[
+            "verification"
+        ]["roles_total"]
         store.write_profile_json(loaded.directory, loaded.profile)
         print(f"extracted {args.name} -> {profile_json}")
         return 0 if report.passed else 1
     if args.cmd == "verify":
         loaded = store.load_profile(args.name, args.scope)
-        report = run_qa(None, loaded.profile, mode="verify", qa=args.qa, shell=loaded.shell_path)
+        report = run_qa(
+            None, loaded.profile, mode="verify", qa=args.qa, shell=loaded.shell_path
+        )
         loaded.profile["verification"]["status"] = report.verdict
         if args.accept and report.passed:
             loaded.profile.setdefault("verification", {})["accepted"] = True
@@ -103,15 +113,27 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if loaded.kind == "docx":
                 out = docx_generate.generate(
-                    loaded.profile, loaded.shell_path, parse_idoc(data), args.output, findings=gen_findings
+                    loaded.profile,
+                    loaded.shell_path,
+                    parse_idoc(data),
+                    args.output,
+                    findings=gen_findings,
                 )
             elif loaded.kind == "pptx":
                 out = pptx_generate.generate(
-                    loaded.profile, loaded.shell_path, parse_idoc(data), args.output, findings=gen_findings
+                    loaded.profile,
+                    loaded.shell_path,
+                    parse_idoc(data),
+                    args.output,
+                    findings=gen_findings,
                 )
             elif loaded.kind == "xlsx":
                 out = xlsx_generate.generate(
-                    loaded.profile, loaded.shell_path, parse_grid(data), args.output, findings=gen_findings
+                    loaded.profile,
+                    loaded.shell_path,
+                    parse_grid(data),
+                    args.output,
+                    findings=gen_findings,
                 )
             else:
                 raise ValueError(f"unsupported profile kind: {loaded.kind}")
@@ -119,10 +141,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR generate: {exc}")
             return 1
         from brandkit.qa import visual as vqa
+
         visual_dir = vqa.default_out_dir(args.output)
         report = run_qa(
-            out, loaded.profile, mode="generate", qa=args.qa,
-            shell=loaded.shell_path, extra_findings=gen_findings,
+            out,
+            loaded.profile,
+            mode="generate",
+            qa=args.qa,
+            shell=loaded.shell_path,
+            extra_findings=gen_findings,
             out_dir=visual_dir,
         )
         for finding in report.findings:
@@ -146,8 +173,12 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"ERROR comprehend: cannot read {args.input}: {exc}")
             return 1
-        generated_by = comp.pop("generated_by", None) if isinstance(comp, dict) else None
-        result = comprehension_mod.merge(loaded.profile, comp, generated_by=generated_by)
+        generated_by = (
+            comp.pop("generated_by", None) if isinstance(comp, dict) else None
+        )
+        result = comprehension_mod.merge(
+            loaded.profile, comp, generated_by=generated_by
+        )
         store.write_profile_json(loaded.directory, loaded.profile)
         if not result.ok:
             print(f"comprehension REJECTED ({len(result.problems)} problem(s)):")
@@ -155,15 +186,22 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {problem}")
             return 1
         n_slots = len(loaded.profile["comprehension"].get("cover_slots") or {})
-        n_idx = len((loaded.profile["comprehension"].get("conventions") or {}).get("indexes") or [])
-        print(f"comprehended {args.name}: {n_slots} cover slot(s), {n_idx} index convention(s) [present]")
+        n_idx = len(
+            (loaded.profile["comprehension"].get("conventions") or {}).get("indexes")
+            or []
+        )
+        print(
+            f"comprehended {args.name}: {n_slots} cover slot(s), {n_idx} index convention(s) [present]"
+        )
         return 0
     if args.cmd == "list":
         for summary in store.list_profiles():
             if args.scope != "auto" and summary.scope != args.scope:
                 continue
             shadow = " shadowed" if summary.shadowed else ""
-            print(f"{summary.name}\t{summary.scope}\t{summary.kind}\t{summary.verification_status}{shadow}")
+            print(
+                f"{summary.name}\t{summary.scope}\t{summary.kind}\t{summary.verification_status}{shadow}"
+            )
         return 0
     return 2
 

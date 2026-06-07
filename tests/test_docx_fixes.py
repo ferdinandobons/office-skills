@@ -15,6 +15,7 @@ Covers the confirmed findings:
   - refresh_toc marks only TOC fields and returns the real count.
   - arch-3  a fabricated profile is caught by validate() without shell I/O.
 """
+
 from __future__ import annotations
 
 import sys
@@ -24,7 +25,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from docx import Document
-from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
@@ -36,7 +36,6 @@ from brandkit.ir import components as ir_components
 from brandkit.ir import model as ir
 from brandkit.profile import schema
 from brandkit.profile.resolver import ProfileResolver
-from brandkit.qa import checks_deterministic
 from brandkit.qa.gate import run_qa
 from brandkit.qa.model import Finding
 
@@ -48,21 +47,35 @@ def _add_toc_field(doc, instr='TOC \\o "1-3" \\h \\z \\u'):
     """Append a real TOC complex field paragraph (begin/instrText/separate/end)."""
     p = doc.add_paragraph()
     r = p.add_run()
-    fb = OxmlElement("w:fldChar"); fb.set(qn("w:fldCharType"), "begin"); r._r.append(fb)
+    fb = OxmlElement("w:fldChar")
+    fb.set(qn("w:fldCharType"), "begin")
+    r._r.append(fb)
     r2 = p.add_run()
-    it = OxmlElement("w:instrText"); it.text = instr; r2._r.append(it)
+    it = OxmlElement("w:instrText")
+    it.text = instr
+    r2._r.append(it)
     r3 = p.add_run()
-    fs = OxmlElement("w:fldChar"); fs.set(qn("w:fldCharType"), "separate"); r3._r.append(fs)
+    fs = OxmlElement("w:fldChar")
+    fs.set(qn("w:fldCharType"), "separate")
+    r3._r.append(fs)
     # a nested PAGEREF field inside the TOC entry - must NOT be marked dirty
     rp = p.add_run()
-    pb = OxmlElement("w:fldChar"); pb.set(qn("w:fldCharType"), "begin"); rp._r.append(pb)
+    pb = OxmlElement("w:fldChar")
+    pb.set(qn("w:fldCharType"), "begin")
+    rp._r.append(pb)
     rp2 = p.add_run()
-    pit = OxmlElement("w:instrText"); pit.text = "PAGEREF _Toc1 \\h"; rp2._r.append(pit)
+    pit = OxmlElement("w:instrText")
+    pit.text = "PAGEREF _Toc1 \\h"
+    rp2._r.append(pit)
     rp3 = p.add_run()
-    pe = OxmlElement("w:fldChar"); pe.set(qn("w:fldCharType"), "end"); rp3._r.append(pe)
-    r5 = p.add_run("entry .... 1")
+    pe = OxmlElement("w:fldChar")
+    pe.set(qn("w:fldCharType"), "end")
+    rp3._r.append(pe)
+    p.add_run("entry .... 1")
     r6 = p.add_run()
-    fe = OxmlElement("w:fldChar"); fe.set(qn("w:fldCharType"), "end"); r6._r.append(fe)
+    fe = OxmlElement("w:fldChar")
+    fe.set(qn("w:fldCharType"), "end")
+    r6._r.append(fe)
     return p
 
 
@@ -74,23 +87,37 @@ def _add_toc_field_split(doc, instr_parts):
     """
     p = doc.add_paragraph()
     r = p.add_run()
-    fb = OxmlElement("w:fldChar"); fb.set(qn("w:fldCharType"), "begin"); r._r.append(fb)
+    fb = OxmlElement("w:fldChar")
+    fb.set(qn("w:fldCharType"), "begin")
+    r._r.append(fb)
     for part in instr_parts:
         rp = p.add_run()
-        it = OxmlElement("w:instrText"); it.text = part; rp._r.append(it)
+        it = OxmlElement("w:instrText")
+        it.text = part
+        rp._r.append(it)
     r3 = p.add_run()
-    fs = OxmlElement("w:fldChar"); fs.set(qn("w:fldCharType"), "separate"); r3._r.append(fs)
+    fs = OxmlElement("w:fldChar")
+    fs.set(qn("w:fldCharType"), "separate")
+    r3._r.append(fs)
     # nested PAGEREF field inside a rendered entry - its instrText must not leak
     # into the outer TOC instruction.
     rb = p.add_run()
-    pb = OxmlElement("w:fldChar"); pb.set(qn("w:fldCharType"), "begin"); rb._r.append(pb)
+    pb = OxmlElement("w:fldChar")
+    pb.set(qn("w:fldCharType"), "begin")
+    rb._r.append(pb)
     rb2 = p.add_run()
-    pit = OxmlElement("w:instrText"); pit.text = "PAGEREF _Toc1 \\h"; rb2._r.append(pit)
+    pit = OxmlElement("w:instrText")
+    pit.text = "PAGEREF _Toc1 \\h"
+    rb2._r.append(pit)
     rb3 = p.add_run()
-    pe = OxmlElement("w:fldChar"); pe.set(qn("w:fldCharType"), "end"); rb3._r.append(pe)
+    pe = OxmlElement("w:fldChar")
+    pe.set(qn("w:fldCharType"), "end")
+    rb3._r.append(pe)
     p.add_run("entry .... 1")
     r6 = p.add_run()
-    fe = OxmlElement("w:fldChar"); fe.set(qn("w:fldCharType"), "end"); r6._r.append(fe)
+    fe = OxmlElement("w:fldChar")
+    fe.set(qn("w:fldCharType"), "end")
+    r6._r.append(fe)
     return p
 
 
@@ -117,10 +144,10 @@ class TocOverCaptureTest(unittest.TestCase):
     def test_post_body_contents_heading_is_body_and_cleared(self):
         doc = Document()
         doc.add_paragraph("{{title}}", style="Title")
-        _add_toc_field(doc)                                    # real TOC
-        doc.add_paragraph("Real Section", style="Heading 1")   # body
-        doc.add_paragraph("real body text", style="Normal")    # body
-        doc.add_paragraph("Contents", style="Heading 1")       # body heading named Contents
+        _add_toc_field(doc)  # real TOC
+        doc.add_paragraph("Real Section", style="Heading 1")  # body
+        doc.add_paragraph("real body text", style="Normal")  # body
+        doc.add_paragraph("Contents", style="Heading 1")  # body heading named Contents
         doc.add_paragraph("more real body text", style="Normal")
 
         cls = structure.classify_body_children(doc)
@@ -128,9 +155,11 @@ class TocOverCaptureTest(unittest.TestCase):
         regions = [c["region"] for c in cls if not c["is_sectpr"]]
         self.assertEqual(regions.count("toc"), 1)
         contents_idx = next(
-            i for i, c in enumerate(cls)
+            i
+            for i, c in enumerate(cls)
             if _local_name(list(doc.element.body)[c["index"]].tag) == "p"
-            and "Contents" in "".join(
+            and "Contents"
+            in "".join(
                 t.text or "" for t in list(doc.element.body)[c["index"]].iter(w("t"))
             )
         )
@@ -146,12 +175,12 @@ class TocOverCaptureTest(unittest.TestCase):
     def test_stacked_index_front_matter_is_preserved(self):
         doc = Document()
         doc.add_paragraph("{{title}}", style="Title")
-        doc.add_paragraph("Sommario", style="Heading 1")        # TOC heading (folded in)
-        _add_toc_field(doc, 'TOC \\o "1-3" \\h')                # main TOC
+        doc.add_paragraph("Sommario", style="Heading 1")  # TOC heading (folded in)
+        _add_toc_field(doc, 'TOC \\o "1-3" \\h')  # main TOC
         doc.add_paragraph("Indice delle Tabelle", style="Heading 1")  # index separator
-        _add_toc_field(doc, 'TOC \\h \\c "Tabella"')            # table-of-tables
+        _add_toc_field(doc, 'TOC \\h \\c "Tabella"')  # table-of-tables
         doc.add_paragraph("Indice delle figure", style="Heading 1")  # index separator
-        _add_toc_field(doc, 'TOC \\h \\c "Figura"')            # table-of-figures
+        _add_toc_field(doc, 'TOC \\h \\c "Figura"')  # table-of-figures
         doc.add_paragraph("1. Introduction", style="Heading 1")  # body starts
         doc.add_paragraph("body para", style="Normal")
 
@@ -209,7 +238,7 @@ class RefreshTocTest(unittest.TestCase):
     def test_marks_only_toc_fields_and_returns_count(self):
         doc = Document()
         doc.add_paragraph("{{title}}", style="Title")
-        _add_toc_field(doc)          # 1 TOC field (with a nested PAGEREF inside)
+        _add_toc_field(doc)  # 1 TOC field (with a nested PAGEREF inside)
         _add_toc_field(doc, 'TOC \\h \\c "Tabella"')  # 2nd TOC field
         doc.add_paragraph("Body", style="Heading 1")
 
@@ -244,7 +273,9 @@ class RefreshTocTest(unittest.TestCase):
 
         self.assertEqual(rewritten, 1)
         toc_text = "\n".join(
-            "".join(t.text or "" for t in list(doc.element.body)[c["index"]].iter(w("t")))
+            "".join(
+                t.text or "" for t in list(doc.element.body)[c["index"]].iter(w("t"))
+            )
             for c in structure.classify_body_children(doc)
             if c["region"] == "toc"
         )
@@ -258,11 +289,12 @@ class RefreshTocTest(unittest.TestCase):
         # and must not absorb the nested PAGEREF instruction.
         doc = Document()
         doc.add_paragraph("{{title}}", style="Title")
-        _add_toc_field_split(doc, ['TOC \\o ', '"1-3" \\h \\z \\u'])
+        _add_toc_field_split(doc, ["TOC \\o ", '"1-3" \\h \\z \\u'])
         doc.add_paragraph("Old Template Body", style="Heading 1")
 
         rewritten = structure.refresh_visible_outline_toc_cache(
-            doc, [(1, "New Real Section")],
+            doc,
+            [(1, "New Real Section")],
         )
         self.assertEqual(rewritten, 1)
 
@@ -276,7 +308,9 @@ class RefreshTocTest(unittest.TestCase):
         self.assertIn("\\z", toc_instr)
         self.assertNotIn("PAGEREF", toc_instr)  # nested field not over-captured
         toc_text = "\n".join(
-            "".join(t.text or "" for t in list(doc.element.body)[c["index"]].iter(w("t")))
+            "".join(
+                t.text or "" for t in list(doc.element.body)[c["index"]].iter(w("t"))
+            )
             for c in structure.classify_body_children(doc)
             if c["region"] == "toc"
         )
@@ -287,11 +321,12 @@ class RefreshTocTest(unittest.TestCase):
         # left for Word to recompute, not overwritten with outline headings.
         doc = Document()
         doc.add_paragraph("{{title}}", style="Title")
-        _add_toc_field_split(doc, ['TOC \\h ', '\\c "Figura"'])
+        _add_toc_field_split(doc, ["TOC \\h ", '\\c "Figura"'])
         doc.add_paragraph("Old Template Body", style="Heading 1")
 
         rewritten = structure.refresh_visible_outline_toc_cache(
-            doc, [(1, "New Real Section")],
+            doc,
+            [(1, "New Real Section")],
         )
         self.assertEqual(rewritten, 0)
 
@@ -328,7 +363,8 @@ class ResolverTargetsExistTest(unittest.TestCase):
             self.assertEqual(report.verdict, schema.VerificationStatus.FAILED.value)
             self.assertTrue(
                 any(
-                    f.check == "resolver_targets_exist" and f.severity == schema.Severity.ERROR.value
+                    f.check == "resolver_targets_exist"
+                    and f.severity == schema.Severity.ERROR.value
                     for f in report.findings
                 )
             )
@@ -371,7 +407,8 @@ class LiteralMarkdownGateTest(unittest.TestCase):
             self.assertEqual(report.verdict, schema.VerificationStatus.FAILED.value)
             self.assertTrue(
                 any(
-                    f.check == "no_literal_markdown" and f.severity == schema.Severity.ERROR.value
+                    f.check == "no_literal_markdown"
+                    and f.severity == schema.Severity.ERROR.value
                     for f in report.findings
                 )
             )
@@ -412,12 +449,16 @@ class UnhandledBlockTest(unittest.TestCase):
             gen = Document(out)
             texts = [p.text for p in gen.paragraphs]
             # No empty paragraph injected for the image/kpi blocks.
-            self.assertNotIn("", [t for t in texts if t == "" and texts.index(t) >= before])
+            self.assertNotIn(
+                "", [t for t in texts if t == "" and texts.index(t) >= before]
+            )
             self.assertIn("real text", "\n".join(texts))
             # Exactly the two degradation findings recorded.
             degraded = [f for f in findings if f.check == "block_degraded"]
             self.assertEqual(len(degraded), 2)
-            self.assertTrue(all(f.severity == schema.Severity.WARNING.value for f in degraded))
+            self.assertTrue(
+                all(f.severity == schema.Severity.WARNING.value for f in degraded)
+            )
 
     def test_unknown_block_type_raises(self):
         import tempfile
@@ -479,7 +520,9 @@ class NestedListTest(unittest.TestCase):
                     ir.ListItem(runs=[{"t": "Top2"}], level=0),
                 ],
             )
-            docx_generate.generate(prof, shell, ir.IntermediateDocument(blocks=[block]), out)
+            docx_generate.generate(
+                prof, shell, ir.IntermediateDocument(blocks=[block]), out
+            )
             text = "\n".join(p.text for p in Document(out).paragraphs)
             for expected in ("Top1", "Nested1a", "Nested1b", "Top2"):
                 self.assertIn(expected, text)
@@ -488,8 +531,12 @@ class NestedListTest(unittest.TestCase):
         prof = _docx_profile(
             {
                 "_index": ["list.bullet.1", "list.bullet.2"],
-                "list.bullet.1": {"resolver": {"type": "named_style", "style_name": "List Bullet"}},
-                "list.bullet.2": {"resolver": {"type": "named_style", "style_name": "List Bullet 2"}},
+                "list.bullet.1": {
+                    "resolver": {"type": "named_style", "style_name": "List Bullet"}
+                },
+                "list.bullet.2": {
+                    "resolver": {"type": "named_style", "style_name": "List Bullet 2"}
+                },
             }
         )
         r = ProfileResolver(prof)
@@ -515,11 +562,20 @@ class TableSpanTest(unittest.TestCase):
             block = ir.Table(
                 columns=[{"t": "A"}, {"t": "B"}, {"t": "C"}],
                 rows=[
-                    [ir.TableCell(runs=[{"t": "X"}], colspan=2), ir.TableCell(runs=[{"t": "Y"}])],
-                    [ir.TableCell(runs=[{"t": "1"}]), ir.TableCell(runs=[{"t": "2"}]), ir.TableCell(runs=[{"t": "3"}])],
+                    [
+                        ir.TableCell(runs=[{"t": "X"}], colspan=2),
+                        ir.TableCell(runs=[{"t": "Y"}]),
+                    ],
+                    [
+                        ir.TableCell(runs=[{"t": "1"}]),
+                        ir.TableCell(runs=[{"t": "2"}]),
+                        ir.TableCell(runs=[{"t": "3"}]),
+                    ],
                 ],
             )
-            docx_generate.generate(prof, shell, ir.IntermediateDocument(blocks=[block]), out)
+            docx_generate.generate(
+                prof, shell, ir.IntermediateDocument(blocks=[block]), out
+            )
             t = Document(out).tables[-1]
             self.assertEqual(len(t.columns), 3)  # span-expanded width, not cell count
             # The spanned 'X' cell occupies columns 0 and 1; 'Y' lands in column 2,
@@ -541,13 +597,18 @@ class CoverSdtTest(unittest.TestCase):
         # Build a block-level sdt with an alias 'Titolo' and placeholder text.
         sdt = OxmlElement("w:sdt")
         sdtPr = OxmlElement("w:sdtPr")
-        alias = OxmlElement("w:alias"); alias.set(w("val"), "Titolo"); sdtPr.append(alias)
+        alias = OxmlElement("w:alias")
+        alias.set(w("val"), "Titolo")
+        sdtPr.append(alias)
         sdt.append(sdtPr)
         sdtContent = OxmlElement("w:sdtContent")
         p = OxmlElement("w:p")
         r = OxmlElement("w:r")
-        t = OxmlElement("w:t"); t.text = "Insert title here"
-        r.append(t); p.append(r); sdtContent.append(p)
+        t = OxmlElement("w:t")
+        t.text = "Insert title here"
+        r.append(t)
+        p.append(r)
+        sdtContent.append(p)
         sdt.append(sdtContent)
         body.insert(list(body).index(sectpr), sdt)
         # a TOC field after the cover
@@ -589,7 +650,7 @@ class CoverSdtTest(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
-            shell = tmp = Path(td) / "shell.docx"
+            shell = Path(td) / "shell.docx"
             doc = Document()
             _add_toc_field(doc)
             doc.add_paragraph("Body Heading", style="Heading 1")
@@ -626,7 +687,11 @@ class IntraProfileConsistencyTest(unittest.TestCase):
         prof["roles"] = {
             "_index": ["cover.title"],
             "cover.title": {
-                "resolver": {"type": "placeholder", "layout": "Title Slide", "ph_idx": 0}
+                "resolver": {
+                    "type": "placeholder",
+                    "layout": "Title Slide",
+                    "ph_idx": 0,
+                }
             },
         }
         problems = schema.validate(prof)
@@ -647,7 +712,9 @@ class IntraProfileConsistencyTest(unittest.TestCase):
         prof["surface"] = {"pptx": {"layouts": {"Cover": {}}}}
         prof["roles"] = {
             "_index": ["cover.title"],
-            "cover.title": {"resolver": {"type": "placeholder", "layout": "Cover", "ph_idx": 0}},
+            "cover.title": {
+                "resolver": {"type": "placeholder", "layout": "Cover", "ph_idx": 0}
+            },
         }
         problems = schema.validate(prof)
         self.assertFalse(any("layouts" in p for p in problems))
@@ -666,7 +733,12 @@ class ComponentExpansionTest(unittest.TestCase):
     def test_defined_component_expands_to_primitives(self):
         prof = _docx_profile({"_index": []})
         prof["components"] = {
-            "intro": {"blocks": [{"type": "heading", "level": 1, "text": "Intro"}, {"type": "paragraph", "text": "body"}]}
+            "intro": {
+                "blocks": [
+                    {"type": "heading", "level": 1, "text": "Intro"},
+                    {"type": "paragraph", "text": "body"},
+                ]
+            }
         }
         doc = ir.IntermediateDocument(blocks=[ir.Component(ref="intro")])
         expanded = ir_components.expand_components(doc, prof)
@@ -689,16 +761,24 @@ def _add_multi_paragraph_index(doc, instr):
     """
     p1 = doc.add_paragraph()
     r = p1.add_run()
-    fb = OxmlElement("w:fldChar"); fb.set(qn("w:fldCharType"), "begin"); r._r.append(fb)
+    fb = OxmlElement("w:fldChar")
+    fb.set(qn("w:fldCharType"), "begin")
+    r._r.append(fb)
     r2 = p1.add_run()
-    it = OxmlElement("w:instrText"); it.text = instr; r2._r.append(it)
+    it = OxmlElement("w:instrText")
+    it.text = instr
+    r2._r.append(it)
     r3 = p1.add_run()
-    fs = OxmlElement("w:fldChar"); fs.set(qn("w:fldCharType"), "separate"); r3._r.append(fs)
+    fs = OxmlElement("w:fldChar")
+    fs.set(qn("w:fldCharType"), "separate")
+    r3._r.append(fs)
     p1.add_run("entry one .... 1")
-    doc.add_paragraph("entry two .... 2")          # a styled index entry
-    p3 = doc.add_paragraph()                        # closing end fldChar paragraph
+    doc.add_paragraph("entry two .... 2")  # a styled index entry
+    p3 = doc.add_paragraph()  # closing end fldChar paragraph
     re = p3.add_run()
-    fe = OxmlElement("w:fldChar"); fe.set(qn("w:fldCharType"), "end"); re._r.append(fe)
+    fe = OxmlElement("w:fldChar")
+    fe.set(qn("w:fldCharType"), "end")
+    re._r.append(fe)
     return p1, p3
 
 
@@ -720,21 +800,28 @@ class ComprehensionReconcileTest(unittest.TestCase):
         outline TOC, and a stacked caption index with a multi-paragraph span."""
         shell = Path(td) / "shell.docx"
         doc = Document()
-        doc.add_paragraph("Brand Header")                      # para slot (leave)
-        title_p = doc.add_paragraph("Insert title here")       # para slot (title)
+        doc.add_paragraph("Brand Header")  # para slot (leave)
+        title_p = doc.add_paragraph("Insert title here")  # para slot (title)
         # a subtitle SDT (alias) inserted into the cover region, right AFTER the
         # title paragraph (a raw body.append would land after the final sectPr).
         sdt = OxmlElement("w:sdt")
         sdtPr = OxmlElement("w:sdtPr")
-        alias = OxmlElement("w:alias"); alias.set(qn("w:val"), "Subtitle"); sdtPr.append(alias)
+        alias = OxmlElement("w:alias")
+        alias.set(qn("w:val"), "Subtitle")
+        sdtPr.append(alias)
         sdt.append(sdtPr)
         sdtContent = OxmlElement("w:sdtContent")
-        sp = OxmlElement("w:p"); sr = OxmlElement("w:r"); st = OxmlElement("w:t")
-        st.text = "Subtitle prompt"; sr.append(st); sp.append(sr); sdtContent.append(sp)
+        sp = OxmlElement("w:p")
+        sr = OxmlElement("w:r")
+        st = OxmlElement("w:t")
+        st.text = "Subtitle prompt"
+        sr.append(st)
+        sp.append(sr)
+        sdtContent.append(sp)
         sdt.append(sdtContent)
         title_p._p.addnext(sdt)
-        _add_toc_field(doc, 'TOC \\o "1-3" \\h')               # outline TOC
-        doc.add_paragraph("Index of Tables")                   # index heading
+        _add_toc_field(doc, 'TOC \\o "1-3" \\h')  # outline TOC
+        doc.add_paragraph("Index of Tables")  # index heading
         _add_multi_paragraph_index(doc, 'TOC \\h \\c "Tabella"')  # caption index
         doc.add_paragraph("Body Heading", style="Heading 1")
         doc.save(shell)
@@ -742,10 +829,14 @@ class ComprehensionReconcileTest(unittest.TestCase):
 
     def _profile_for(self, shell):
         from brandkit.formats.docx import extract as docx_extract
-        import tempfile, os, json
+        import tempfile
+        import os
+        import json
+
         # Extract a real profile so the surfaced inventory ids are authentic.
         with tempfile.TemporaryDirectory() as ed:
-            old = Path.cwd(); os.chdir(ed)
+            old = Path.cwd()
+            os.chdir(ed)
             try:
                 pj = docx_extract.extract(shell, "recon", scope="project")
                 return json.loads(Path(pj).read_text())
@@ -754,34 +845,46 @@ class ComprehensionReconcileTest(unittest.TestCase):
 
     def test_multi_slot_cover_fill_no_duplicate_and_index_removed(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             prof = self._profile_for(shell)
             s = prof["surface"]["docx"]
             anchor_ids = [a["id"] for a in s["cover_anchors"]]
-            field_ids = [f["id"] for f in s["fields"]]
+            [f["id"] for f in s["fields"]]
             # The multi-slot cover surfaced 3 slots; the caption index surfaced.
             self.assertEqual(len(anchor_ids), 3, anchor_ids)
             tabella = next(f["id"] for f in s["fields"] if f["seq_id"] == "Tabella")
             title_anchor = next(
-                a["id"] for a in s["cover_anchors"]
+                a["id"]
+                for a in s["cover_anchors"]
                 if "Insert title here" in (a.get("placeholder") or "")
             )
             sub_anchor = next(
-                a["id"] for a in s["cover_anchors"]
+                a["id"]
+                for a in s["cover_anchors"]
                 if "Subtitle" in (a.get("placeholder") or "")
             )
             comp = {
                 "cover_slots": {
-                    title_anchor: {"binds_to": "title", "fill_rule": "in_place",
-                                   "demo_value": "Insert title here"},
-                    sub_anchor: {"binds_to": "subtitle", "fill_rule": "in_place",
-                                 "demo_value": "Subtitle prompt"},
+                    title_anchor: {
+                        "binds_to": "title",
+                        "fill_rule": "in_place",
+                        "demo_value": "Insert title here",
+                    },
+                    sub_anchor: {
+                        "binds_to": "subtitle",
+                        "fill_rule": "in_place",
+                        "demo_value": "Subtitle prompt",
+                    },
                 },
                 "conventions": {
                     "indexes": [
-                        {"index_ref": tabella, "seq_id": "Tabella",
-                         "reconcile": "clear"}
+                        {
+                            "index_ref": tabella,
+                            "seq_id": "Tabella",
+                            "reconcile": "clear",
+                        }
                     ],
                     "sections": [],
                 },
@@ -792,10 +895,18 @@ class ComprehensionReconcileTest(unittest.TestCase):
             _present_comp(prof, comp)
             out = Path(td) / "out.docx"
             findings: list[Finding] = []
-            docx_generate.generate(prof, shell, ir.IntermediateDocument(
-                blocks=[ir.Heading(level=1, runs=[{"t": "Real Section"}])],
-                cover=ir.Cover(title=[{"t": "Real Title"}], subtitle=[{"t": "Real Subtitle"}]),
-            ), out, findings=findings)
+            docx_generate.generate(
+                prof,
+                shell,
+                ir.IntermediateDocument(
+                    blocks=[ir.Heading(level=1, runs=[{"t": "Real Section"}])],
+                    cover=ir.Cover(
+                        title=[{"t": "Real Title"}], subtitle=[{"t": "Real Subtitle"}]
+                    ),
+                ),
+                out,
+                findings=findings,
+            )
             gen = Document(out)
             text = "".join(t.text or "" for t in gen.element.body.iter(w("t")))
             # Cover filled in place (both slots), no leftover prompt.
@@ -819,6 +930,7 @@ class ComprehensionReconcileTest(unittest.TestCase):
 
     def test_index_clear_downgraded_when_not_corroborated(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             prof = self._profile_for(shell)
@@ -827,18 +939,35 @@ class ComprehensionReconcileTest(unittest.TestCase):
             # reconcile=clear but NO demo verdict and the content HAS a captionable
             # item -> the destructive floor downgrades to KEEP + WARNING.
             comp = {
-                "conventions": {"indexes": [
-                    {"index_ref": tabella, "seq_id": "Tabella", "reconcile": "clear"}
-                ], "sections": []},
+                "conventions": {
+                    "indexes": [
+                        {
+                            "index_ref": tabella,
+                            "seq_id": "Tabella",
+                            "reconcile": "clear",
+                        }
+                    ],
+                    "sections": [],
+                },
                 "demo_classification": {"regions": []},
             }
             _present_comp(prof, comp)
             out = Path(td) / "out.docx"
             findings: list[Finding] = []
-            docx_generate.generate(prof, shell, ir.IntermediateDocument(
-                blocks=[ir.Caption(runs=[{"t": "Table 1. A real caption"}], target="table")],
-                cover=None,
-            ), out, findings=findings)
+            docx_generate.generate(
+                prof,
+                shell,
+                ir.IntermediateDocument(
+                    blocks=[
+                        ir.Caption(
+                            runs=[{"t": "Table 1. A real caption"}], target="table"
+                        )
+                    ],
+                    cover=None,
+                ),
+                out,
+                findings=findings,
+            )
             gen = Document(out)
             text = "".join(t.text or "" for t in gen.element.body.iter(w("t")))
             # The index was KEPT (not corroborated) and a WARNING was recorded.
@@ -847,17 +976,20 @@ class ComprehensionReconcileTest(unittest.TestCase):
 
     def test_absent_comprehension_uses_deterministic_path(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             prof = self._profile_for(shell)
             # comprehension absent (default) -> today's single-title behaviour.
             self.assertEqual(prof["comprehension"]["status"], "absent")
-            out = Path(td) / "out.docx"
+            Path(td) / "out.docx"
             findings: list[Finding] = []
             cleared = covermod.compose_cover(
                 Document(shell), ir.Cover(title=[{"t": "X"}]), prof, findings=findings
             )
-            self.assertEqual(cleared, set())  # deterministic path returns no cleared refs
+            self.assertEqual(
+                cleared, set()
+            )  # deterministic path returns no cleared refs
 
 
 # ---------------------------------------------------------------------------
@@ -880,15 +1012,22 @@ class OrphanIndexHeadingTest(unittest.TestCase):
         title_p = doc.add_paragraph("Insert title here")
         sdt = OxmlElement("w:sdt")
         sdtPr = OxmlElement("w:sdtPr")
-        alias = OxmlElement("w:alias"); alias.set(qn("w:val"), "Titolo"); sdtPr.append(alias)
+        alias = OxmlElement("w:alias")
+        alias.set(qn("w:val"), "Titolo")
+        sdtPr.append(alias)
         sdt.append(sdtPr)
         sc = OxmlElement("w:sdtContent")
-        sp = OxmlElement("w:p"); sr = OxmlElement("w:r"); st = OxmlElement("w:t")
-        st.text = "Insert title here"; sr.append(st); sp.append(sr); sc.append(sp)
+        sp = OxmlElement("w:p")
+        sr = OxmlElement("w:r")
+        st = OxmlElement("w:t")
+        st.text = "Insert title here"
+        sr.append(st)
+        sp.append(sr)
+        sc.append(sp)
         sdt.append(sc)
         title_p._p.addnext(sdt)
-        _add_toc_field(doc, 'TOC \\o "1-3" \\h')                 # outline TOC
-        doc.add_paragraph("Indice delle Tabelle")                # introducing heading
+        _add_toc_field(doc, 'TOC \\o "1-3" \\h')  # outline TOC
+        doc.add_paragraph("Indice delle Tabelle")  # introducing heading
         _add_multi_paragraph_index(doc, 'TOC \\h \\c "Tabella"')  # caption index
         doc.add_paragraph("Real Body Heading", style="Heading 1")  # body (post-index)
         doc.save(shell)
@@ -919,9 +1058,13 @@ class OrphanIndexHeadingTest(unittest.TestCase):
 
     def _profile_for(self, shell):
         from brandkit.formats.docx import extract as docx_extract
-        import tempfile, os, json
+        import tempfile
+        import os
+        import json
+
         with tempfile.TemporaryDirectory() as ed:
-            old = Path.cwd(); os.chdir(ed)
+            old = Path.cwd()
+            os.chdir(ed)
             try:
                 pj = docx_extract.extract(shell, "orphan", scope="project")
                 return json.loads(Path(pj).read_text())
@@ -932,11 +1075,14 @@ class OrphanIndexHeadingTest(unittest.TestCase):
         # Unit-level: the structural remove pulls in the toc-region heading above
         # the field span, and the post-index body heading is NEVER touched.
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             doc = Document(shell)
             tabella = next(
-                f["id"] for f in structure.inventory_fields(doc) if f["seq_id"] == "Tabella"
+                f["id"]
+                for f in structure.inventory_fields(doc)
+                if f["seq_id"] == "Tabella"
             )
             idxs = structure._index_field_remove_indices(doc, tabella)
             children = list(doc.element.body)
@@ -955,16 +1101,25 @@ class OrphanIndexHeadingTest(unittest.TestCase):
         # End-to-end regression: the cover fill inserts a paragraph (index shift);
         # the index reconcile must resolve refs BEFORE that shift, so the orphan
         # 'Indice delle Tabelle' heading is removed and idempotency holds.
-        import tempfile, hashlib
+        import tempfile
+        import hashlib
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             prof = self._profile_for(shell)
             s = prof["surface"]["docx"]
             tabella = next(f["id"] for f in s["fields"] if f["seq_id"] == "Tabella")
             comp = {
-                "conventions": {"indexes": [
-                    {"index_ref": tabella, "seq_id": "Tabella", "reconcile": "clear"}
-                ], "sections": []},
+                "conventions": {
+                    "indexes": [
+                        {
+                            "index_ref": tabella,
+                            "seq_id": "Tabella",
+                            "reconcile": "clear",
+                        }
+                    ],
+                    "sections": [],
+                },
                 "demo_classification": {
                     "regions": [{"region_ref": f"region.{tabella}", "verdict": "demo"}]
                 },
@@ -1004,6 +1159,7 @@ class OrphanIndexHeadingTest(unittest.TestCase):
 
     def test_full_generate_prunes_leading_empty_body_artifacts_after_index_clear(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell_with_empty_body_artifacts(td)
             prof = self._profile_for(shell)
@@ -1011,7 +1167,13 @@ class OrphanIndexHeadingTest(unittest.TestCase):
             tabella = next(f["id"] for f in s["fields"] if f["seq_id"] == "Tabella")
             comp = {
                 "conventions": {
-                    "indexes": [{"index_ref": tabella, "seq_id": "Tabella", "reconcile": "clear"}],
+                    "indexes": [
+                        {
+                            "index_ref": tabella,
+                            "seq_id": "Tabella",
+                            "reconcile": "clear",
+                        }
+                    ],
                     "sections": [],
                 },
                 "demo_classification": {
@@ -1051,6 +1213,7 @@ class OrphanIndexHeadingTest(unittest.TestCase):
         # purely structurally off the first body Heading-1.
         self.assertFalse(hasattr(structure, "DEMO_MARKERS"))
         import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_shell(td)
             demo = structure.detect_demo_region(Document(shell))

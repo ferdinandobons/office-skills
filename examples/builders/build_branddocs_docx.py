@@ -63,6 +63,7 @@ random or timestamp, so re-running yields an identical file.
 Run:
     PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_docx.py
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -164,9 +165,19 @@ def _p(doc, text: str = "", style_id: str | None = None):
 # into ``word/styles.xml`` via lxml so we control header shading / banding /
 # borders python-docx cannot express.
 # ---------------------------------------------------------------------------
-def _add_paragraph_style(styles, style_id, name, *, based_on="Normal", color=None,
-                         bold=False, size_pt=None, shading=None, box_border=None,
-                         left_accent=None):
+def _add_paragraph_style(
+    styles,
+    style_id,
+    name,
+    *,
+    based_on="Normal",
+    color=None,
+    bold=False,
+    size_pt=None,
+    shading=None,
+    box_border=None,
+    left_accent=None,
+):
     st = _sub(styles, "style", type="paragraph", styleId=style_id)
     st.set(_w("customStyle"), "1")
     _sub(st, "name", val=name)
@@ -308,22 +319,52 @@ def _build_styles(doc):
     _ensure_list_paragraph_style(styles)
     _ensure_toc_styles(styles)
     # Branded paragraph styles.
-    _add_paragraph_style(styles, "BrandDocsCoverTitle", "BrandDocs Cover Title",
-                         color=BRAND_NAVY, bold=True, size_pt=28)
-    _add_paragraph_style(styles, "BrandDocsCoverSubtitle", "BrandDocs Cover Subtitle",
-                         color=BRAND_TEAL, size_pt=14)
-    _add_paragraph_style(styles, "BrandDocsCallout", "BrandDocs Callout",
-                         color=BRAND_NAVY, shading=BRAND_LIGHT, box_border=BRAND_TEAL,
-                         left_accent=BRAND_AMBER)
-    _add_paragraph_style(styles, "BrandDocsQuote", "BrandDocs Quote",
-                         color=BRAND_NAVY, shading=BRAND_BAND, box_border=BRAND_NAVY,
-                         left_accent=BRAND_AMBER, size_pt=12)
+    _add_paragraph_style(
+        styles,
+        "BrandDocsCoverTitle",
+        "BrandDocs Cover Title",
+        color=BRAND_NAVY,
+        bold=True,
+        size_pt=28,
+    )
+    _add_paragraph_style(
+        styles,
+        "BrandDocsCoverSubtitle",
+        "BrandDocs Cover Subtitle",
+        color=BRAND_TEAL,
+        size_pt=14,
+    )
+    _add_paragraph_style(
+        styles,
+        "BrandDocsCallout",
+        "BrandDocs Callout",
+        color=BRAND_NAVY,
+        shading=BRAND_LIGHT,
+        box_border=BRAND_TEAL,
+        left_accent=BRAND_AMBER,
+    )
+    _add_paragraph_style(
+        styles,
+        "BrandDocsQuote",
+        "BrandDocs Quote",
+        color=BRAND_NAVY,
+        shading=BRAND_BAND,
+        box_border=BRAND_NAVY,
+        left_accent=BRAND_AMBER,
+        size_pt=12,
+    )
     # List styles -> reference w:num 1 (bullet L1), 2 (bullet L2), 3 (number L1).
     # BUG-LIST-ILVL: the L2 bullet pins w:ilvl=1 so it binds to level 1 of
     # abstractNum 0 (a distinct ``list.bullet.2`` role, not a dedup of L1).
-    _add_list_style(styles, "BrandDocsBulletL1", "BrandDocs Bullet L1", num_id=1, ilvl=0)
-    _add_list_style(styles, "BrandDocsBulletL2", "BrandDocs Bullet L2", num_id=2, ilvl=1)
-    _add_list_style(styles, "BrandDocsNumberL1", "BrandDocs Number L1", num_id=3, ilvl=0)
+    _add_list_style(
+        styles, "BrandDocsBulletL1", "BrandDocs Bullet L1", num_id=1, ilvl=0
+    )
+    _add_list_style(
+        styles, "BrandDocsBulletL2", "BrandDocs Bullet L2", num_id=2, ilvl=1
+    )
+    _add_list_style(
+        styles, "BrandDocsNumberL1", "BrandDocs Number L1", num_id=3, ilvl=0
+    )
     # Branded table style.
     _add_table_style(styles)
 
@@ -350,21 +391,21 @@ def _populate_numbering(root) -> None:
         for lvl, level in enumerate(levels):
             fmt, text, indent = level[0], level[1], level[2]
             font = level[3] if len(level) > 3 else None
-            l = _sub(an, "lvl", ilvl=str(lvl))
-            _sub(l, "start", val="1")
-            _sub(l, "numFmt", val=fmt)
+            lvl_el = _sub(an, "lvl", ilvl=str(lvl))
+            _sub(lvl_el, "start", val="1")
+            _sub(lvl_el, "numFmt", val=fmt)
             # BUG-LIST-BULLETGLYPH: an EXPLICIT, real Unicode lvlText glyph on a
             # plain text font. The old defs used Symbol-font private-use codepoints
             # (U+F0B7 / U+F0A7) which Word maps to a bullet/section mark but
             # LibreOffice renders as a stray club/box (no glyph at those PUA
             # points without the Symbol font). Plain Unicode bullets on a standard
             # font render identically in Word and LibreOffice.
-            _sub(l, "lvlText", val=text)
-            _sub(l, "lvlJc", val="left")
-            pPr = _sub(l, "pPr")
+            _sub(lvl_el, "lvlText", val=text)
+            _sub(lvl_el, "lvlJc", val="left")
+            pPr = _sub(lvl_el, "pPr")
             _sub(pPr, "ind", left=str(indent), hanging="360")
             if fmt == "bullet" and font:
-                rPr = _sub(l, "rPr")
+                rPr = _sub(lvl_el, "rPr")
                 rfonts = _sub(rPr, "rFonts")
                 rfonts.set(_w("ascii"), font)
                 rfonts.set(_w("hAnsi"), font)
@@ -375,10 +416,13 @@ def _populate_numbering(root) -> None:
     # abstractNum 0: two-level bullet. L1 = filled round bullet (U+2022), L2 =
     # en-dash (U+2013), both on Arial so the glyphs are readable in Word AND
     # LibreOffice (no Symbol-font club/box).
-    abstract(0, [
-        ("bullet", "•", 720, "Arial"),
-        ("bullet", "–", 1440, "Arial"),
-    ])
+    abstract(
+        0,
+        [
+            ("bullet", "•", 720, "Arial"),
+            ("bullet", "–", 1440, "Arial"),
+        ],
+    )
     # abstractNum 1: decimal numbered list.
     abstract(1, [("decimal", "%1.", 720)])
 
@@ -403,9 +447,13 @@ def _build_footnotes_xml() -> bytes:
         _sub(r, kind if kind == "separator" else "continuationSeparator")
 
     s = _sub(root, "footnote", type="separator", id="-1")
-    p = _sub(s, "p"); r = _sub(p, "r"); _sub(r, "separator")
+    p = _sub(s, "p")
+    r = _sub(p, "r")
+    _sub(r, "separator")
     c = _sub(root, "footnote", type="continuationSeparator", id="0")
-    p = _sub(c, "p"); r = _sub(p, "r"); _sub(r, "continuationSeparator")
+    p = _sub(c, "p")
+    r = _sub(p, "r")
+    _sub(r, "continuationSeparator")
 
     # The authored footnote (id 2).
     fn = _sub(root, "footnote", id="2")
@@ -465,7 +513,7 @@ def _cover_title_sdt():
     placeholder = _sub(sdtPr, "placeholder")
     _sub(placeholder, "docPart", val="DefaultPlaceholder_Title")
     _sub(sdtPr, "text")
-    sdtEndPr = _sub(sdt, "sdtEndPr")
+    _sub(sdt, "sdtEndPr")
     sdtContent = _sub(sdt, "sdtContent")
     p = _sub(sdtContent, "p")
     pPr = _sub(p, "pPr")
@@ -508,8 +556,11 @@ def _build_cover(doc):
     # demo values are realistic synthetic content (CR-COVER-VALUES); the SDT
     # title above now carries a realistic synthetic title (CR-COVER-TITLE) while
     # still classifying as the title slot via its ``w:alias='Title'``.
-    sub_p = _p(doc, "Annual Brand Operations Review - BrandDocs Corp (synthetic)",
-               "BrandDocsCoverSubtitle")
+    sub_p = _p(
+        doc,
+        "Annual Brand Operations Review - BrandDocs Corp (synthetic)",
+        "BrandDocsCoverSubtitle",
+    )
     docid_p = doc.add_paragraph("Document ID: DSK-BR-2026-014")
     date_p = doc.add_paragraph("June 5, 2026")
     # A navy brand band sits BELOW the date slot (empty text, not an anchor).
@@ -560,7 +611,7 @@ def _toc_entry(doc, label, page, *, style):
     tab = _sub(pp, "r")
     _sub(tab, "tab")
     pp.append(_fldchar("begin"))
-    pp.append(_run(f' PAGEREF _Toc{page:04d} \\h ', instr=True))
+    pp.append(_run(f" PAGEREF _Toc{page:04d} \\h ", instr=True))
     pp.append(_fldchar("separate"))
     pp.append(_run(str(page)))
     pp.append(_fldchar("end"))
@@ -610,9 +661,15 @@ def _build_index_front_matter(doc):
     def _tot_entries(d):
         # Cached entries mirror the two real SEQ Table captions in the body and
         # the landscape appendix (does NOT change the fields count).
-        _toc_entry(d, "Table 1. BrandDocs FY2026 quarterly revenue", 5, style="TableofFigures")
-        _toc_entry(d, "Table 2. BrandDocs risk and readiness matrix", 6, style="TableofFigures")
-        _toc_entry(d, "Table 3. BrandDocs program rollout matrix", 7, style="TableofFigures")
+        _toc_entry(
+            d, "Table 1. BrandDocs FY2026 quarterly revenue", 5, style="TableofFigures"
+        )
+        _toc_entry(
+            d, "Table 2. BrandDocs risk and readiness matrix", 6, style="TableofFigures"
+        )
+        _toc_entry(
+            d, "Table 3. BrandDocs program rollout matrix", 7, style="TableofFigures"
+        )
 
     _complex_field(doc, 'TOC \\h \\z \\c "Table" ', _tot_entries)
 
@@ -637,7 +694,7 @@ def _seq_caption(doc, prefix, seq_name, tail, *, style="Caption"):
     pp = p._p
     pp.append(_run(f"{prefix} "))
     pp.append(_fldchar("begin"))
-    pp.append(_run(f' SEQ {seq_name} \\* ARABIC ', instr=True))
+    pp.append(_run(f" SEQ {seq_name} \\* ARABIC ", instr=True))
     pp.append(_fldchar("separate"))
     pp.append(_run("1"))
     pp.append(_fldchar("end"))
@@ -671,8 +728,16 @@ def _build_table(doc):
     table.style = "BrandDocs Table"
     # Tell Word which conditional formats to apply (first row + banding).
     tblPr = table._tbl.tblPr
-    look = _sub(tblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
-                lastColumn="0", noHBand="0", noVBand="1")
+    _sub(
+        tblPr,
+        "tblLook",
+        firstRow="1",
+        lastRow="0",
+        firstColumn="0",
+        lastColumn="0",
+        noHBand="0",
+        noVBand="1",
+    )
     hdr = ("Quarter", "Revenue", "Growth", "Region")
     for c, label in zip(table.rows[0].cells, hdr):
         c.text = label
@@ -685,8 +750,12 @@ def _build_table(doc):
     for r, row in enumerate(data, start=1):
         for c, val in zip(table.rows[r].cells, row):
             c.text = val
-    _seq_caption(doc, "Table", "Table",
-                 "BrandDocs FY2026 quarterly revenue by region (synthetic data).")
+    _seq_caption(
+        doc,
+        "Table",
+        "Table",
+        "BrandDocs FY2026 quarterly revenue by region (synthetic data).",
+    )
 
 
 def _build_figure(doc, logo_rid, logo_cx, logo_cy):
@@ -694,7 +763,9 @@ def _build_figure(doc, logo_rid, logo_cx, logo_cy):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run()
-    run._r.append(_inline_drawing(logo_rid, logo_cx, logo_cy, "BrandDocsLogoFigure", 100))
+    run._r.append(
+        _inline_drawing(logo_rid, logo_cx, logo_cy, "BrandDocsLogoFigure", 100)
+    )
     _seq_caption(doc, "Figure", "Figure", "BrandDocs Corp wordmark (synthetic).")
 
 
@@ -728,14 +799,27 @@ def _build_risk_matrix(doc):
     table = doc.add_table(rows=5, cols=4)
     table.style = "BrandDocs Table"
     tblPr = table._tbl.tblPr
-    _sub(tblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
-         lastColumn="0", noHBand="0", noVBand="1")
+    _sub(
+        tblPr,
+        "tblLook",
+        firstRow="1",
+        lastRow="0",
+        firstColumn="0",
+        lastColumn="0",
+        noHBand="0",
+        noVBand="1",
+    )
     headers = ("Area", "Signal", "Owner", "Mitigation")
     for c, label in zip(table.rows[0].cells, headers):
         c.text = label
     rows = [
         ("Visual QA", "Renderer drift", "Platform", "Smoke-test DOCX/PPTX/XLSX"),
-        ("Comprehension", "Missing inventory", "Model Ops", "Fail closed on empty refs"),
+        (
+            "Comprehension",
+            "Missing inventory",
+            "Model Ops",
+            "Fail closed on empty refs",
+        ),
         ("Brand fidelity", "Style fallback", "Design", "Re-assert captured styles"),
         ("Delivery", "Stale cache", "Engineering", "Refresh visible field results"),
     ]
@@ -743,14 +827,15 @@ def _build_risk_matrix(doc):
         for c, val in zip(table.rows[r].cells, row):
             c.text = val
     _set_col_widths(table, (1980, 1980, 1800, 3600))
-    _seq_caption(doc, "Table", "Table",
-                 "BrandDocs risk and readiness matrix (synthetic).")
+    _seq_caption(
+        doc, "Table", "Table", "BrandDocs risk and readiness matrix (synthetic)."
+    )
 
 
 def _build_footnote_paragraph(doc, footnote_id):
     _p(doc, "BrandDocs footnote demo", "Heading2")
     body = doc.add_paragraph("BrandDocs Corp")
-    run = body.add_run(" is a registered placeholder brand")
+    body.add_run(" is a registered placeholder brand")
     # Append a footnoteReference run (id -> footnotes.xml).
     fr = _sub(body._p, "r")
     frpr = _sub(fr, "rPr")
@@ -785,15 +870,19 @@ def _build_demo_body(doc):
 def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     drawing = _el("drawing")
     inline = etree.SubElement(drawing, f"{{{WP}}}inline")
-    inline.set("distT", "0"); inline.set("distB", "0")
-    inline.set("distL", "0"); inline.set("distR", "0")
+    inline.set("distT", "0")
+    inline.set("distB", "0")
+    inline.set("distL", "0")
+    inline.set("distR", "0")
     ext = etree.SubElement(inline, f"{{{WP}}}extent")
-    ext.set("cx", str(cx)); ext.set("cy", str(cy))
+    ext.set("cx", str(cx))
+    ext.set("cy", str(cy))
     eff = etree.SubElement(inline, f"{{{WP}}}effectExtent")
     for k in ("l", "t", "r", "b"):
         eff.set(k, "0")
     docpr = etree.SubElement(inline, f"{{{WP}}}docPr")
-    docpr.set("id", str(doc_pr_id)); docpr.set("name", name)
+    docpr.set("id", str(doc_pr_id))
+    docpr.set("name", name)
     cnv = etree.SubElement(inline, f"{{{WP}}}cNvGraphicFramePr")
     locks = etree.SubElement(cnv, f"{{{A}}}graphicFrameLocks")
     locks.set("noChangeAspect", "1")
@@ -803,7 +892,8 @@ def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     pic = etree.SubElement(gdata, f"{{{PIC}}}pic")
     nvpic = etree.SubElement(pic, f"{{{PIC}}}nvPicPr")
     cnvpr = etree.SubElement(nvpic, f"{{{PIC}}}cNvPr")
-    cnvpr.set("id", "0"); cnvpr.set("name", name)
+    cnvpr.set("id", "0")
+    cnvpr.set("name", name)
     etree.SubElement(nvpic, f"{{{PIC}}}cNvPicPr")
     blipfill = etree.SubElement(pic, f"{{{PIC}}}blipFill")
     blip = etree.SubElement(blipfill, f"{{{A}}}blip")
@@ -812,9 +902,14 @@ def _inline_drawing(rid, cx, cy, name, doc_pr_id):
     etree.SubElement(stretch, f"{{{A}}}fillRect")
     sppr = etree.SubElement(pic, f"{{{PIC}}}spPr")
     xfrm = etree.SubElement(sppr, f"{{{A}}}xfrm")
-    off = etree.SubElement(xfrm, f"{{{A}}}off"); off.set("x", "0"); off.set("y", "0")
-    extb = etree.SubElement(xfrm, f"{{{A}}}ext"); extb.set("cx", str(cx)); extb.set("cy", str(cy))
-    geom = etree.SubElement(sppr, f"{{{A}}}prstGeom"); geom.set("prst", "rect")
+    off = etree.SubElement(xfrm, f"{{{A}}}off")
+    off.set("x", "0")
+    off.set("y", "0")
+    extb = etree.SubElement(xfrm, f"{{{A}}}ext")
+    extb.set("cx", str(cx))
+    extb.set("cy", str(cy))
+    geom = etree.SubElement(sppr, f"{{{A}}}prstGeom")
+    geom.set("prst", "rect")
     etree.SubElement(geom, f"{{{A}}}avLst")
     return drawing
 
@@ -888,7 +983,7 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     new_section = doc.add_section(WD_SECTION.NEW_PAGE)
     new_section.orientation = WD_ORIENT.LANDSCAPE
     # Swap page width/height for landscape (python-docx does not auto-swap).
-    new_section.page_width = Twips(15840)   # 11"
+    new_section.page_width = Twips(15840)  # 11"
     new_section.page_height = Twips(12240)  # 8.5"
     _p(doc, "BrandDocs landscape appendix", "Heading1")
     doc.add_paragraph(
@@ -903,16 +998,56 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     wide = doc.add_table(rows=5, cols=7)
     wide.style = "BrandDocs Table"
     wtblPr = wide._tbl.tblPr
-    _sub(wtblPr, "tblLook", firstRow="1", lastRow="0", firstColumn="0",
-         lastColumn="0", noHBand="0", noVBand="1")
+    _sub(
+        wtblPr,
+        "tblLook",
+        firstRow="1",
+        lastRow="0",
+        firstColumn="0",
+        lastColumn="0",
+        noHBand="0",
+        noVBand="1",
+    )
     whdr = ("Workstream", "Owner", "Q1", "Q2", "Q3", "Q4", "Status")
     for c, label in zip(wide.rows[0].cells, whdr):
         c.text = label
     wdata = [
-        ("Template surface", "Brand Office", "Scope", "Build", "QA", "Ship", "On track"),
-        ("Profile extraction", "Platform", "Spec", "Build", "Verify", "Tune", "On track"),
-        ("Generation engine", "Platform", "Design", "Build", "Build", "Verify", "At risk"),
-        ("Rollout & training", "Enablement", "Plan", "Draft", "Pilot", "Launch", "Planned"),
+        (
+            "Template surface",
+            "Brand Office",
+            "Scope",
+            "Build",
+            "QA",
+            "Ship",
+            "On track",
+        ),
+        (
+            "Profile extraction",
+            "Platform",
+            "Spec",
+            "Build",
+            "Verify",
+            "Tune",
+            "On track",
+        ),
+        (
+            "Generation engine",
+            "Platform",
+            "Design",
+            "Build",
+            "Build",
+            "Verify",
+            "At risk",
+        ),
+        (
+            "Rollout & training",
+            "Enablement",
+            "Plan",
+            "Draft",
+            "Pilot",
+            "Launch",
+            "Planned",
+        ),
     ]
     for r, row in enumerate(wdata, start=1):
         for c, val in zip(wide.rows[r].cells, row):
@@ -920,8 +1055,9 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
     # PL-PRINT-MARGINS: fixed column widths sum to 13680 twips (15840 - 2*1in
     # margins), so the 7-column table fits the landscape usable width.
     _set_col_widths(wide, (2880, 2400, 1680, 1680, 1680, 1680, 1680))
-    _seq_caption(doc, "Table", "Table",
-                 "BrandDocs FY2026 program rollout matrix (synthetic).")
+    _seq_caption(
+        doc, "Table", "Table", "BrandDocs FY2026 program rollout matrix (synthetic)."
+    )
 
     # PL-LANDSCAPE-CAPTION-SEQ / CR-FIG2-CURVE: a real SECOND inline figure so the
     # cached "Figure 2" in the Table of Figures corresponds to a rendered figure.
@@ -936,8 +1072,12 @@ def _add_landscape_section(doc, curve_rid=None, fig_cx=0, fig_cy=0):
         frun._r.append(
             _inline_drawing(curve_rid, fig_cx, fig_cy, "BrandDocsGrowthFigure", 300)
         )
-        _seq_caption(doc, "Figure", "Figure",
-                     "BrandDocs Corp growth curve (synthetic illustration).")
+        _seq_caption(
+            doc,
+            "Figure",
+            "Figure",
+            "BrandDocs Corp growth curve (synthetic illustration).",
+        )
     return new_section
 
 
@@ -965,7 +1105,8 @@ def build(out: Path = OUT) -> Path:
 
     # 3) Footnotes part attached; footnote id 2 is the authored note.
     _attach_part(
-        doc, "word/footnotes.xml",
+        doc,
+        "word/footnotes.xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
         _build_footnotes_xml(),
         f"{R}/footnotes",
@@ -976,8 +1117,8 @@ def build(out: Path = OUT) -> Path:
     # document part (for Figure 1) and to the header part (for the header logo)
     # independently. A SECOND media part carries the real growth-curve figure
     # (CR-FIG2-CURVE).
-    logo_blob = branddocs_mark_png(640, 160)     # wide wordmark (image1.png)
-    curve_blob = branddocs_curve_png(480, 200)   # ~12:5 growth curve (image2.png)
+    logo_blob = branddocs_mark_png(640, 160)  # wide wordmark (image1.png)
+    curve_blob = branddocs_curve_png(480, 200)  # ~12:5 growth curve (image2.png)
     doc_logo_rid = _relate_image_to(doc.part, logo_blob)
     doc_curve_rid = _relate_image_to(doc.part, curve_blob, partname="media/image2.png")
 
@@ -1014,8 +1155,9 @@ def build(out: Path = OUT) -> Path:
     # The curve PNG is 480x200 (~12:5), so the extent matches: cx=2286000 EMU
     # (2.5in), cy=2286000*5//12=952500 EMU (exact 12:5, no distortion).
     land_fig_cx, land_fig_cy = 2286000, 952500
-    _add_landscape_section(doc, curve_rid=doc_curve_rid,
-                           fig_cx=land_fig_cx, fig_cy=land_fig_cy)
+    _add_landscape_section(
+        doc, curve_rid=doc_curve_rid, fig_cx=land_fig_cx, fig_cy=land_fig_cy
+    )
 
     # 8) Ask Word to refresh the cached fields on open.
     _request_update_fields(doc)

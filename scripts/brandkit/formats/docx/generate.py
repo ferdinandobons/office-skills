@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """DOCX generation from an IntermediateDocument."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -104,7 +105,9 @@ def generate(
     # reconciliation removed must carry a corroborated destructive verdict, else
     # ERROR (a wrong delete is not recoverable). Model-free; reads frozen verdicts.
     if store.comprehension_is_present(profile):
-        sink.extend(check_no_net_structure_loss(cleared_anchors | removed_refs, profile))
+        sink.extend(
+            check_no_net_structure_loss(cleared_anchors | removed_refs, profile)
+        )
 
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -222,7 +225,13 @@ def _reconcile_indexes_and_demo(
     return removed
 
 
-def _write_block(doc, profile: dict, resolver: ProfileResolver, block: ir.Block, findings: list[Finding]) -> None:
+def _write_block(
+    doc,
+    profile: dict,
+    resolver: ProfileResolver,
+    block: ir.Block,
+    findings: list[Finding],
+) -> None:
     if isinstance(block, ir.Heading):
         para = doc.add_paragraph(textutil.runs_to_text(block.runs))
         _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
@@ -247,14 +256,20 @@ def _write_block(doc, profile: dict, resolver: ProfileResolver, block: ir.Block,
         _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
         if block.attribution:
             attr = doc.add_paragraph(textutil.runs_to_text(block.attribution))
-            _apply_resolved_style(doc, attr, resolver.resolve_role("paragraph"), findings)
+            _apply_resolved_style(
+                doc, attr, resolver.resolve_role("paragraph"), findings
+            )
     elif isinstance(block, ir.PageBreak):
         doc.add_page_break()
     elif block.TYPE in _UNHANDLED_BLOCK_TYPES:
         # No writer for this block in the M1 docx vertical. Skip cleanly - NEVER
         # emit a blank ``Normal`` paragraph - and record a degradation finding so
         # the dropped content is visible in QA instead of silently lost.
-        sev = schema.Severity.INFO.value if block.TYPE == "toc" else schema.Severity.WARNING.value
+        sev = (
+            schema.Severity.INFO.value
+            if block.TYPE == "toc"
+            else schema.Severity.WARNING.value
+        )
         findings.append(
             Finding(
                 "block_degraded",
@@ -332,10 +347,20 @@ def _write_table(doc, resolver, block, findings) -> None:
     table = doc.add_table(rows=rows, cols=cols)
     _apply_table_style(doc, table, resolver.resolve_block(block), findings)
 
-    header_op = resolver.resolve_role(schema.role_id("table", (block.role or "default"), "header"), fallback=None)
+    header_op = resolver.resolve_role(
+        schema.role_id("table", (block.role or "default"), "header"), fallback=None
+    )
     row_offset = 0
     if block.columns:
-        _fill_row(doc, table, 0, [_as_cell(c) for c in block.columns], header_op, findings, force_header=True)
+        _fill_row(
+            doc,
+            table,
+            0,
+            [_as_cell(c) for c in block.columns],
+            header_op,
+            findings,
+            force_header=True,
+        )
         row_offset = 1
     for r_idx, row in enumerate(block.rows):
         _fill_row(doc, table, r_idx + row_offset, row, header_op, findings)
@@ -344,7 +369,9 @@ def _write_table(doc, resolver, block, findings) -> None:
         _apply_resolved_style(doc, para, resolver.resolve_role("caption"), findings)
 
 
-def _fill_row(doc, table, r_idx, cells, header_op, findings, *, force_header=False) -> None:
+def _fill_row(
+    doc, table, r_idx, cells, header_op, findings, *, force_header=False
+) -> None:
     """Fill one logical row, honoring colspan/rowspan by merging grid cells."""
     c_cursor = 0
     ncols = len(table.columns)
@@ -360,7 +387,11 @@ def _fill_row(doc, table, r_idx, cells, header_op, findings, *, force_header=Fal
             end_r = min(r_idx + rspan - 1, len(table.rows) - 1)
             anchor = anchor.merge(table.cell(end_r, end_c))
         anchor.text = textutil.runs_to_text(cell.runs)
-        if (force_header or getattr(cell, "header", False)) and header_op is not None and header_op.resolver:
+        if (
+            (force_header or getattr(cell, "header", False))
+            and header_op is not None
+            and header_op.resolver
+        ):
             for para in anchor.paragraphs:
                 _apply_resolved_style(doc, para, header_op, findings)
         c_cursor += cspan

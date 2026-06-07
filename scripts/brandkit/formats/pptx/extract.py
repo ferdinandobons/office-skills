@@ -12,7 +12,13 @@ from brandkit.ooxml import pack
 from brandkit.profile import schema, store
 
 
-def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str | Path | None = None) -> Path:
+def extract(
+    template: str | Path,
+    name: str,
+    *,
+    scope: str = "project",
+    cwd: str | Path | None = None,
+) -> Path:
     template_path = Path(template)
     prs = Presentation(template_path)
     layouts = _layouts(prs)
@@ -50,7 +56,10 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
         "pptx",
         {"name": name, "display_name": name},
         extracted_at=datetime.now(timezone.utc).isoformat(),
-        source_template={"filename": template_path.name, "sha256": store.sha256_file(template_path)},
+        source_template={
+            "filename": template_path.name,
+            "sha256": store.sha256_file(template_path),
+        },
         theme=_theme(),
         roles=roles,
         surface=surface,
@@ -63,17 +72,27 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
     demo_present = any(r.get("kind") == "demo" for r in regions)
     profile["anchors"] = {
         "cover": {
-            "kind": schema.AnchorKind.PLACEHOLDER.value if cover_anchors else schema.AnchorKind.NONE.value,
+            "kind": schema.AnchorKind.PLACEHOLDER.value
+            if cover_anchors
+            else schema.AnchorKind.NONE.value,
             "slots_found": len(cover_anchors),
         },
         "demo_region": {"present": demo_present},
         "sections": {"present": bool(sections)},
     }
     profile["provenance"]["ooxml_parts_seen"] = pack.list_parts(template_path)
-    profile["artifact_catalog"] = _artifact_catalog(template_path, prs, profile["provenance"]["ooxml_parts_seen"], layouts)
+    profile["artifact_catalog"] = _artifact_catalog(
+        template_path, prs, profile["provenance"]["ooxml_parts_seen"], layouts
+    )
     profile["capabilities"] = _capabilities()
     target = store.target_dir_for_save(name, scope, cwd=cwd)
-    return store.save_profile(target, profile, template_path.read_bytes(), extra_files={"PROFILE.md": _profile_md(profile)}, overwrite=True)
+    return store.save_profile(
+        target,
+        profile,
+        template_path.read_bytes(),
+        extra_files={"PROFILE.md": _profile_md(profile)},
+        overwrite=True,
+    )
 
 
 # Layout classification, cover/content picking, and placeholder-type families now
@@ -100,7 +119,9 @@ def _roles(prs: Presentation, layouts: dict) -> dict:
     described = _classify_layouts(prs)
     roles: dict = {"_index": []}
 
-    def add(rid: str, resolver: dict, confidence: float, status: str, signal: str) -> None:
+    def add(
+        rid: str, resolver: dict, confidence: float, status: str, signal: str
+    ) -> None:
         roles[rid] = {
             "resolver": resolver,
             "appearance": {},
@@ -114,7 +135,12 @@ def _roles(prs: Presentation, layouts: dict) -> dict:
     def stub_resolver() -> dict:
         # A stub names no layout, so the intra-profile consistency check (which
         # only fires when ``layout`` is non-null) cannot be tripped by a fiction.
-        return {"type": schema.ResolverType.PLACEHOLDER.value, "layout": None, "ph_idx": None, "ph_type": None}
+        return {
+            "type": schema.ResolverType.PLACEHOLDER.value,
+            "layout": None,
+            "ph_idx": None,
+            "ph_type": None,
+        }
 
     cover = _pick_cover(described)
     if cover is not None:
@@ -127,7 +153,9 @@ def _roles(prs: Presentation, layouts: dict) -> dict:
                 "ph_type": "title",
             },
             0.9 if cover["subtitle_idx"] is not None else 0.7,
-            schema.Status.ROBUST.value if cover["subtitle_idx"] is not None else schema.Status.BEST_EFFORT.value,
+            schema.Status.ROBUST.value
+            if cover["subtitle_idx"] is not None
+            else schema.Status.BEST_EFFORT.value,
             f"layout {cover['name']!r} title placeholder (idx {cover['title_idx']})",
         )
     else:
@@ -214,7 +242,9 @@ def _layouts(prs: Presentation) -> dict:
     return out
 
 
-def _artifact_catalog(path: Path, prs: Presentation, parts: list[str], layouts: dict) -> dict:
+def _artifact_catalog(
+    path: Path, prs: Presentation, parts: list[str], layouts: dict
+) -> dict:
     out = catalog.part_catalog(path)
     out["ooxml_parts"] = parts
     out["slide_size_emu"] = {"w": int(prs.slide_width), "h": int(prs.slide_height)}
@@ -241,12 +271,18 @@ def _artifact_catalog(path: Path, prs: Presentation, parts: list[str], layouts: 
     # Typed native-component inventory per slide (table/chart/picture counts), the
     # baseline the component-survival check diffs against the output deck so a
     # down-rendered native object is caught deterministically (plan P5).
-    components = {c["index"]: c["components"] for c in structure.slide_component_inventory(prs)}
+    components = {
+        c["index"]: c["components"] for c in structure.slide_component_inventory(prs)
+    }
     out["slides"] = [
         {
             "layout": slide.slide_layout.name,
             "shape_count": len(slide.shapes),
-            "texts": [shape.text[:200] for shape in slide.shapes if hasattr(shape, "text") and shape.text],
+            "texts": [
+                shape.text[:200]
+                for shape in slide.shapes
+                if hasattr(shape, "text") and shape.text
+            ],
             "components": components.get(i, {"table": 0, "chart": 0, "picture": 0}),
         }
         for i, slide in enumerate(prs.slides)
@@ -268,10 +304,15 @@ def _theme() -> dict:
     return {
         "colors": {},
         "palette_roles": {"primary": {"theme": "accent1"}, "text": {"theme": "dk1"}},
-        "fonts": {"major": {"latin": None, "fallback": "Arial"}, "minor": {"latin": None, "fallback": "Calibri"}},
+        "fonts": {
+            "major": {"latin": None, "fallback": "Arial"},
+            "minor": {"latin": None, "fallback": "Calibri"},
+        },
         "embedded_fonts": [],
     }
 
 
 def _profile_md(profile: dict) -> str:
-    return "# Brand Profile: " + profile["identity"]["display_name"] + "\n\n- kind: pptx\n"
+    return (
+        "# Brand Profile: " + profile["identity"]["display_name"] + "\n\n- kind: pptx\n"
+    )

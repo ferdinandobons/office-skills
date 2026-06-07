@@ -14,6 +14,7 @@ comprehension is present it steers the cover (fill / clear / leave named regions
 and demo (clear sample-data regions ruled ``verdict=demo``); when absent the
 deterministic path fills exactly the named cells/regions the grid names.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -51,7 +52,9 @@ def generate(
 
     # The named-range geometry the resolver's ``named_range`` ops point at. This is
     # the profile's OWN surfaced map (the author's range names), not a code literal.
-    regions = ((profile.get("surface") or {}).get("xlsx") or {}).get("named_regions") or {}
+    regions = ((profile.get("surface") or {}).get("xlsx") or {}).get(
+        "named_regions"
+    ) or {}
 
     # Reverse index: named-range NAME -> the role id whose resolver targets it. The
     # grid is keyed by the author's range names (its vocabulary); we resolve each
@@ -88,7 +91,9 @@ def generate(
         target = _resolve_named_target(resolver, name_to_role, regions, name, sink)
         sheet, coord = target["sheet"], target["range"]
         min_col, min_row, max_col, max_row = range_boundaries(coord)
-        _check_region_bounds(name, values, max_rows=max_row - min_row + 1, max_cols=max_col - min_col + 1)
+        _check_region_bounds(
+            name, values, max_rows=max_row - min_row + 1, max_cols=max_col - min_col + 1
+        )
         ws = wb[sheet]
         for r_idx, row in enumerate(values):
             for c_idx, value in enumerate(row):
@@ -177,7 +182,9 @@ def _resolve_named_target(resolver, name_to_role, regions, name, findings) -> di
     raise ValueError(f"unknown named cell/range {name!r}")
 
 
-def _reconcile_cover_and_demo(wb, profile: dict, grid: GridDocument, regions: dict, findings: list[Finding]) -> set[str]:
+def _reconcile_cover_and_demo(
+    wb, profile: dict, grid: GridDocument, regions: dict, findings: list[Finding]
+) -> set[str]:
     """Reconcile preserved cover anchors + demo sample-data regions with new content.
 
     Comprehension-steered; a no-op when comprehension is absent (the deterministic
@@ -194,16 +201,25 @@ def _reconcile_cover_and_demo(wb, profile: dict, grid: GridDocument, regions: di
     if not isinstance(comp, dict):
         return set()
 
-    cover_anchors = ((profile.get("surface") or {}).get("xlsx") or {}).get("cover_anchors") or []
+    cover_anchors = ((profile.get("surface") or {}).get("xlsx") or {}).get(
+        "cover_anchors"
+    ) or []
     region_inv = ((profile.get("surface") or {}).get("xlsx") or {}).get("regions") or []
-    anchor_to_name = {a.get("id"): a.get("name") for a in cover_anchors if isinstance(a, dict)}
-    region_to_name = {r.get("id"): r.get("name") for r in region_inv if isinstance(r, dict)}
+    anchor_to_name = {
+        a.get("id"): a.get("name") for a in cover_anchors if isinstance(a, dict)
+    }
+    region_to_name = {
+        r.get("id"): r.get("name") for r in region_inv if isinstance(r, dict)
+    }
 
     removed: set[str] = set()
 
     # Cover anchors ruled CLEAR.
     for anchor_ref, slot in (comp.get("cover_slots") or {}).items():
-        if not isinstance(slot, dict) or slot.get("fill_rule") != schema.FillRule.CLEAR.value:
+        if (
+            not isinstance(slot, dict)
+            or slot.get("fill_rule") != schema.FillRule.CLEAR.value
+        ):
             continue
         name = anchor_to_name.get(anchor_ref)
         target = regions.get(name) if name else None
@@ -240,7 +256,9 @@ def _cover_anchor_styles(wb, profile: dict, regions: dict) -> dict[str, str]:
     off the shell, never a code literal. Empty when the surface has no cover
     anchors (the deterministic-only path preserves style automatically anyway).
     """
-    anchors = ((profile.get("surface") or {}).get("xlsx") or {}).get("cover_anchors") or []
+    anchors = ((profile.get("surface") or {}).get("xlsx") or {}).get(
+        "cover_anchors"
+    ) or []
     builtins = {"Normal", ""}
     out: dict[str, str] = {}
     for a in anchors:
@@ -300,9 +318,7 @@ def _normalize_for_idempotency(path: Path) -> None:
     core = parts.get("docProps/core.xml")
     if core is not None:
         text = core.decode("utf-8")
-        created = re.search(
-            r"<dcterms:created[^>]*>(.*?)</dcterms:created>", text
-        )
+        created = re.search(r"<dcterms:created[^>]*>(.*?)</dcterms:created>", text)
         if created:
             text = re.sub(
                 r"(<dcterms:modified[^>]*>).*?(</dcterms:modified>)",
@@ -373,9 +389,15 @@ def _clear_region(wb, target: dict, *, skip_rows: int = 0) -> bool:
     return True
 
 
-def _check_region_bounds(name: str, values: list[list], *, max_rows: int, max_cols: int) -> None:
+def _check_region_bounds(
+    name: str, values: list[list], *, max_rows: int, max_cols: int
+) -> None:
     if len(values) > max_rows:
-        raise ValueError(f"region {name!r} has {len(values)} rows; named range allows {max_rows}")
+        raise ValueError(
+            f"region {name!r} has {len(values)} rows; named range allows {max_rows}"
+        )
     for idx, row in enumerate(values, start=1):
         if len(row) > max_cols:
-            raise ValueError(f"region {name!r} row {idx} has {len(row)} columns; named range allows {max_cols}")
+            raise ValueError(
+                f"region {name!r} row {idx} has {len(row)} columns; named range allows {max_cols}"
+            )

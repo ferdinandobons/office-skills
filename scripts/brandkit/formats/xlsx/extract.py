@@ -11,6 +11,7 @@ legal-empty field inventory (a workbook has no TOC-style field code). Purpose is
 the model's job (``cover_slots`` / ``demo_classification``); the extractor only
 records what the geometry proves.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -24,7 +25,13 @@ from brandkit.ooxml import pack
 from brandkit.profile import schema, store
 
 
-def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str | Path | None = None) -> Path:
+def extract(
+    template: str | Path,
+    name: str,
+    *,
+    scope: str = "project",
+    cwd: str | Path | None = None,
+) -> Path:
     template_path = Path(template)
     wb = load_workbook(template_path, data_only=False)
 
@@ -66,7 +73,10 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
         "xlsx",
         {"name": name, "display_name": name},
         extracted_at=datetime.now(timezone.utc).isoformat(),
-        source_template={"filename": template_path.name, "sha256": store.sha256_file(template_path)},
+        source_template={
+            "filename": template_path.name,
+            "sha256": store.sha256_file(template_path),
+        },
         theme=_theme(),
         roles=roles,
         surface=surface,
@@ -78,17 +88,27 @@ def extract(template: str | Path, name: str, *, scope: str = "project", cwd: str
     has_sample_data = any(r.get("kind") == "sample_data" for r in regions)
     profile["anchors"] = {
         "cover": {
-            "kind": schema.AnchorKind.NAMED_RANGE.value if cover_anchors else schema.AnchorKind.NONE.value,
+            "kind": schema.AnchorKind.NAMED_RANGE.value
+            if cover_anchors
+            else schema.AnchorKind.NONE.value,
             "slots_found": len(cover_anchors),
         },
         "demo_region": {"present": has_sample_data},
         "toc": {"present": False},
     }
     profile["provenance"]["ooxml_parts_seen"] = pack.list_parts(template_path)
-    profile["artifact_catalog"] = _artifact_catalog(template_path, wb, named_regions, profile["provenance"]["ooxml_parts_seen"])
+    profile["artifact_catalog"] = _artifact_catalog(
+        template_path, wb, named_regions, profile["provenance"]["ooxml_parts_seen"]
+    )
     profile["capabilities"] = _capabilities()
     target = store.target_dir_for_save(name, scope, cwd=cwd)
-    return store.save_profile(target, profile, template_path.read_bytes(), extra_files={"PROFILE.md": _profile_md(profile)}, overwrite=True)
+    return store.save_profile(
+        target,
+        profile,
+        template_path.read_bytes(),
+        extra_files={"PROFILE.md": _profile_md(profile)},
+        overwrite=True,
+    )
 
 
 def _roles(named_regions: dict, named_styles: list[dict] | None = None) -> dict:
@@ -127,7 +147,11 @@ def _roles(named_regions: dict, named_styles: list[dict] | None = None) -> dict:
     # agreeing) - Q7.
     for name in sorted(named_regions):
         rid = xlsx_structure.region_id_for_name(name)
-        add(rid, {"type": schema.ResolverType.NAMED_RANGE.value, "name": name}, f"named range {name}")
+        add(
+            rid,
+            {"type": schema.ResolverType.NAMED_RANGE.value, "name": name},
+            f"named range {name}",
+        )
 
     # Promote present brand cell styles into cell_style roles (structural; the id +
     # resolver target are the style's OWN name). The inventory already computes the
@@ -139,10 +163,18 @@ def _roles(named_regions: dict, named_styles: list[dict] | None = None) -> dict:
         rid = style.get("id")
         if not rid:
             continue
-        add(rid, {"type": schema.ResolverType.CELL_STYLE.value, "style_name": name}, f"named cell style {name}")
+        add(
+            rid,
+            {"type": schema.ResolverType.CELL_STYLE.value, "style_name": name},
+            f"named cell style {name}",
+        )
 
     if not roles["_index"]:
-        add("cell.default", {"type": schema.ResolverType.CELL_STYLE.value, "style_name": "Normal"}, "default style")
+        add(
+            "cell.default",
+            {"type": schema.ResolverType.CELL_STYLE.value, "style_name": "Normal"},
+            "default style",
+        )
     return roles
 
 
@@ -150,7 +182,9 @@ def _artifact_catalog(path: Path, wb, named_regions: dict, parts: list[str]) -> 
     out = catalog.part_catalog(path)
     out["ooxml_parts"] = parts
     out["named_ranges"] = named_regions
-    out["named_styles"] = [style if isinstance(style, str) else style.name for style in wb.named_styles]
+    out["named_styles"] = [
+        style if isinstance(style, str) else style.name for style in wb.named_styles
+    ]
     out["sheets"] = {}
     formulas = {}
     for ws in wb.worksheets:
@@ -161,8 +195,16 @@ def _artifact_catalog(path: Path, wb, named_regions: dict, parts: list[str]) -> 
             "tables": list(ws.tables.keys()),
             "merged_cells": [str(rng) for rng in ws.merged_cells.ranges],
             "dimensions": {
-                "column_widths": {key: dim.width for key, dim in ws.column_dimensions.items() if dim.width},
-                "row_heights": {str(key): dim.height for key, dim in ws.row_dimensions.items() if dim.height},
+                "column_widths": {
+                    key: dim.width
+                    for key, dim in ws.column_dimensions.items()
+                    if dim.width
+                },
+                "row_heights": {
+                    str(key): dim.height
+                    for key, dim in ws.row_dimensions.items()
+                    if dim.height
+                },
             },
             "non_empty_cells": [],
         }
@@ -218,10 +260,15 @@ def _theme() -> dict:
     return {
         "colors": {},
         "palette_roles": {"primary": {"theme": "accent1"}, "text": {"theme": "dk1"}},
-        "fonts": {"major": {"latin": None, "fallback": "Arial"}, "minor": {"latin": None, "fallback": "Calibri"}},
+        "fonts": {
+            "major": {"latin": None, "fallback": "Arial"},
+            "minor": {"latin": None, "fallback": "Calibri"},
+        },
         "embedded_fonts": [],
     }
 
 
 def _profile_md(profile: dict) -> str:
-    return "# Brand Profile: " + profile["identity"]["display_name"] + "\n\n- kind: xlsx\n"
+    return (
+        "# Brand Profile: " + profile["identity"]["display_name"] + "\n\n- kind: xlsx\n"
+    )

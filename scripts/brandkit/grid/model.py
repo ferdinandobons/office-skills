@@ -4,6 +4,7 @@
 M1/M2 grid input is intentionally thin: named cells and named regions are filled
 into the workbook shell. Formulas and workbook topology remain in the shell.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,4 +28,3 @@ class GridDocument:
 
 def parse_grid(data: dict) -> GridDocument:
     return GridDocument.from_dict(data)
-

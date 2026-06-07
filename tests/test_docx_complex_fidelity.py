@@ -20,6 +20,7 @@ artifacts now win over the generic/builtin floor:
 
 All assertions inspect the produced role registry and the real output OOXML.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -38,7 +39,6 @@ from docx.oxml.ns import qn
 
 from brandkit.formats.docx import extract as docx_extract
 from brandkit.formats.docx import generate as docx_generate
-from brandkit.formats.docx import roles as docx_roles
 from brandkit.formats.docx import structure as docx_structure
 from brandkit.formats.docx.structure import w
 from brandkit.ir import model as ir
@@ -150,7 +150,9 @@ class DocxListGenerationTest(unittest.TestCase):
                             ir.ListItem(
                                 runs=[{"t": "Top bullet"}],
                                 level=0,
-                                items=[ir.ListItem(runs=[{"t": "Nested bullet"}], level=1)],
+                                items=[
+                                    ir.ListItem(runs=[{"t": "Nested bullet"}], level=1)
+                                ],
                             ),
                             ir.ListItem(runs=[{"t": "Second top"}], level=0),
                         ],
@@ -209,7 +211,12 @@ class DocxListGenerationTest(unittest.TestCase):
                 blocks=[
                     ir.Table(
                         columns=[{"t": "A"}, {"t": "B"}],
-                        rows=[[ir.TableCell(runs=[{"t": "1"}]), ir.TableCell(runs=[{"t": "2"}])]],
+                        rows=[
+                            [
+                                ir.TableCell(runs=[{"t": "1"}]),
+                                ir.TableCell(runs=[{"t": "2"}]),
+                            ]
+                        ],
                     )
                 ]
             )
@@ -276,14 +283,22 @@ class DocxCoverParagraphStyleTest(unittest.TestCase):
         # a real TOC field after the slot
         p = doc.add_paragraph()
         r = p.add_run()
-        fb = OxmlElement("w:fldChar"); fb.set(qn("w:fldCharType"), "begin"); r._r.append(fb)
+        fb = OxmlElement("w:fldChar")
+        fb.set(qn("w:fldCharType"), "begin")
+        r._r.append(fb)
         r2 = p.add_run()
-        it = OxmlElement("w:instrText"); it.text = 'TOC \\o "1-3" \\h'; r2._r.append(it)
+        it = OxmlElement("w:instrText")
+        it.text = 'TOC \\o "1-3" \\h'
+        r2._r.append(it)
         r3 = p.add_run()
-        fs = OxmlElement("w:fldChar"); fs.set(qn("w:fldCharType"), "separate"); r3._r.append(fs)
+        fs = OxmlElement("w:fldChar")
+        fs.set(qn("w:fldCharType"), "separate")
+        r3._r.append(fs)
         p.add_run("entry 1")
         r4 = p.add_run()
-        fe = OxmlElement("w:fldChar"); fe.set(qn("w:fldCharType"), "end"); r4._r.append(fe)
+        fe = OxmlElement("w:fldChar")
+        fe.set(qn("w:fldCharType"), "end")
+        r4._r.append(fe)
         doc.add_paragraph("Body Heading", style="Heading 1")
         doc.save(shell)
         return shell
@@ -292,7 +307,8 @@ class DocxCoverParagraphStyleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             shell = self._build_paragraph_cover_shell(td)
             # extract a real profile, then bind cover.title to the brand style.
-            old = Path.cwd(); os.chdir(td)
+            old = Path.cwd()
+            os.chdir(td)
             try:
                 pj = docx_extract.extract(shell, "cv", scope="project")
                 prof = json.loads(Path(pj).read_text())
@@ -310,7 +326,8 @@ class DocxCoverParagraphStyleTest(unittest.TestCase):
                 "confidence": 1.0,
             }
             para_anchor = next(
-                a["id"] for a in prof["surface"]["docx"]["cover_anchors"]
+                a["id"]
+                for a in prof["surface"]["docx"]["cover_anchors"]
                 if a["id"].startswith("para.")
             )
             prof.setdefault("provenance", {}).setdefault("shell", {})["sha256"] = "sh"
@@ -319,7 +336,11 @@ class DocxCoverParagraphStyleTest(unittest.TestCase):
             block["source_shell_sha256"] = "sh"
             block["confidence"] = 0.9
             block["cover_slots"] = {
-                para_anchor: {"binds_to": "title", "fill_rule": "in_place", "demo_value": "{{title}}"}
+                para_anchor: {
+                    "binds_to": "title",
+                    "fill_rule": "in_place",
+                    "demo_value": "{{title}}",
+                }
             }
             prof["comprehension"] = block
 
@@ -355,8 +376,10 @@ class DocxNumberingHelpersTest(unittest.TestCase):
         from docx.enum.style import WD_STYLE_TYPE
 
         acme_bullet = next(
-            s for s in doc.styles
-            if s.type == WD_STYLE_TYPE.PARAGRAPH and getattr(s, "style_id", None) == "AcmeBulletL1"
+            s
+            for s in doc.styles
+            if s.type == WD_STYLE_TYPE.PARAGRAPH
+            and getattr(s, "style_id", None) == "AcmeBulletL1"
         )
         binding = docx_structure.style_num_binding(acme_bullet)
         self.assertEqual(binding, ("1", 0))

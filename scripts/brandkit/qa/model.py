@@ -22,4 +22,3 @@ class QAReport:
     @property
     def passed(self) -> bool:
         return not any(f.severity == schema.Severity.ERROR.value for f in self.findings)
-

@@ -24,6 +24,7 @@ Two helpers complete the contract:
 Plus role-id helpers (:func:`role_id`, :func:`parse_role_id`) so callers never
 hand-concatenate role ids like ``"heading.1"``.
 """
+
 from __future__ import annotations
 
 import re
@@ -79,21 +80,27 @@ class ResolverType(str, Enum):
 
 # Which resolver types are legal for which kind (the only dispatch gate).
 LEGAL_RESOLVER_TYPES: dict[str, frozenset[str]] = {
-    Kind.DOCX.value: frozenset({
-        ResolverType.NAMED_STYLE.value,
-        ResolverType.CHART_TEMPLATE.value,
-    }),
-    Kind.PPTX.value: frozenset({
-        ResolverType.PLACEHOLDER.value,
-        ResolverType.NAMED_STYLE.value,
-        ResolverType.CHART_TEMPLATE.value,
-    }),
-    Kind.XLSX.value: frozenset({
-        ResolverType.CELL_STYLE.value,
-        ResolverType.NUMBER_FORMAT.value,
-        ResolverType.NAMED_RANGE.value,
-        ResolverType.CHART_TEMPLATE.value,
-    }),
+    Kind.DOCX.value: frozenset(
+        {
+            ResolverType.NAMED_STYLE.value,
+            ResolverType.CHART_TEMPLATE.value,
+        }
+    ),
+    Kind.PPTX.value: frozenset(
+        {
+            ResolverType.PLACEHOLDER.value,
+            ResolverType.NAMED_STYLE.value,
+            ResolverType.CHART_TEMPLATE.value,
+        }
+    ),
+    Kind.XLSX.value: frozenset(
+        {
+            ResolverType.CELL_STYLE.value,
+            ResolverType.NUMBER_FORMAT.value,
+            ResolverType.NAMED_RANGE.value,
+            ResolverType.CHART_TEMPLATE.value,
+        }
+    ),
 }
 
 
@@ -194,9 +201,9 @@ class Verdict(str, Enum):
 class OverflowCapability(str, Enum):
     """Per-format overflow detection mechanism (§6.5). docx never estimates."""
 
-    ESTIMATOR = "estimator"   # pptx
-    CELLFIT = "cellfit"       # xlsx
-    RENDER = "render"         # docx (LibreOffice render is the only detector)
+    ESTIMATOR = "estimator"  # pptx
+    CELLFIT = "cellfit"  # xlsx
+    RENDER = "render"  # docx (LibreOffice render is the only detector)
     NONE = "none"
 
 
@@ -330,7 +337,9 @@ def build_envelope(
         ValueError: if ``kind`` is not a recognized :class:`Kind`.
     """
     if kind not in KIND_EXTENSION:
-        raise ValueError(f"unknown kind {kind!r}; expected one of {list(KIND_EXTENSION)}")
+        raise ValueError(
+            f"unknown kind {kind!r}; expected one of {list(KIND_EXTENSION)}"
+        )
     ext = KIND_EXTENSION[kind]
 
     ident = {
@@ -411,8 +420,17 @@ def _empty_structure() -> dict:
 # ---------------------------------------------------------------------------
 # Top-level keys every envelope must carry.
 REQUIRED_TOP_KEYS: tuple[str, ...] = (
-    "schema_version", "kind", "identity", "provenance",
-    "theme", "roles", "rules", "anchors", "qa", "verification", "surface",
+    "schema_version",
+    "kind",
+    "identity",
+    "provenance",
+    "theme",
+    "roles",
+    "rules",
+    "anchors",
+    "qa",
+    "verification",
+    "surface",
 )
 
 
@@ -534,7 +552,9 @@ def _validate_resolver_consistency(profile: dict, kind: Optional[str]) -> list[s
         return problems
 
     layouts = sub.get("layouts") if isinstance(sub.get("layouts"), dict) else {}
-    named_regions = sub.get("named_regions") if isinstance(sub.get("named_regions"), dict) else {}
+    named_regions = (
+        sub.get("named_regions") if isinstance(sub.get("named_regions"), dict) else {}
+    )
 
     for rid, entry in roles.items():
         if rid == "_index" or not isinstance(entry, dict):
@@ -646,7 +666,9 @@ def _validate_usage(path: str, usage: Any) -> list[str]:
         return [f"{path}: must be an object"]
     scope = usage.get("scope")
     if scope is not None and scope not in USAGE_SCOPES:
-        problems.append(f"{path}.scope: illegal value {scope!r} (legal: {sorted(USAGE_SCOPES)})")
+        problems.append(
+            f"{path}.scope: illegal value {scope!r} (legal: {sorted(USAGE_SCOPES)})"
+        )
     placement = usage.get("placement")
     if placement is not None and placement not in USAGE_PLACEMENTS:
         problems.append(
@@ -693,7 +715,9 @@ def _validate_structure(structure: Any) -> list[str]:
             )
         order = region.get("order")
         if order is not None and not isinstance(order, int):
-            problems.append(f"structure.skeleton[{i}].order: must be an int, got {order!r}")
+            problems.append(
+                f"structure.skeleton[{i}].order: must be an int, got {order!r}"
+            )
         for attr in STRUCTURE_REGION_ATTRS:
             val = region.get(attr)
             if val is not None and not isinstance(val, bool):
@@ -769,7 +793,9 @@ def _validate_comprehension(comp: Any) -> list[str]:
 
     conf = comp.get("confidence")
     if conf is not None and not isinstance(conf, (int, float)):
-        problems.append(f"comprehension.confidence: must be a number or null, got {conf!r}")
+        problems.append(
+            f"comprehension.confidence: must be a number or null, got {conf!r}"
+        )
     elif isinstance(conf, (int, float)) and not (0.0 <= float(conf) <= 1.0):
         problems.append(f"comprehension.confidence: must be in [0,1], got {conf!r}")
 
@@ -788,7 +814,9 @@ def _validate_comprehension(comp: Any) -> list[str]:
             for anchor_ref, slot in slots.items():
                 path = f"comprehension.cover_slots.{anchor_ref}"
                 if not isinstance(anchor_ref, str) or not anchor_ref:
-                    problems.append(f"{path}: anchor_ref key must be a non-empty string")
+                    problems.append(
+                        f"{path}: anchor_ref key must be a non-empty string"
+                    )
                 if not isinstance(slot, dict):
                     problems.append(f"{path}: must be an object")
                     continue
@@ -799,7 +827,9 @@ def _validate_comprehension(comp: Any) -> list[str]:
                     )
                 bt = slot.get("binds_to")
                 if bt is not None and not isinstance(bt, str):
-                    problems.append(f"{path}.binds_to: must be a string or null, got {bt!r}")
+                    problems.append(
+                        f"{path}.binds_to: must be a string or null, got {bt!r}"
+                    )
 
     # conventions.indexes / conventions.sections
     conventions = comp.get("conventions")
@@ -835,7 +865,9 @@ def _validate_comprehension(comp: Any) -> list[str]:
             regions = demo.get("regions")
             if regions is not None:
                 if not isinstance(regions, list):
-                    problems.append("comprehension.demo_classification.regions: must be a list")
+                    problems.append(
+                        "comprehension.demo_classification.regions: must be a list"
+                    )
                 else:
                     for i, reg in enumerate(regions):
                         path = f"comprehension.demo_classification.regions[{i}]"
@@ -844,7 +876,9 @@ def _validate_comprehension(comp: Any) -> list[str]:
                             continue
                         ref = reg.get("region_ref")
                         if not isinstance(ref, str) or not ref:
-                            problems.append(f"{path}.region_ref: required non-empty string")
+                            problems.append(
+                                f"{path}.region_ref: required non-empty string"
+                            )
                         verdict = reg.get("verdict")
                         if verdict is not None and verdict not in VERDICTS:
                             problems.append(
@@ -875,8 +909,12 @@ def _validate_comp_indexes(indexes: Any) -> list[str]:
                 f"{path}.reconcile: illegal value {rec!r} (legal: {sorted(RECONCILE_RULES)})"
             )
         feeds = idx.get("feeds_from_role_id")
-        if feeds is not None and (not isinstance(feeds, str) or not is_valid_role_id(feeds)):
-            problems.append(f"{path}.feeds_from_role_id: must be a role id or null, got {feeds!r}")
+        if feeds is not None and (
+            not isinstance(feeds, str) or not is_valid_role_id(feeds)
+        ):
+            problems.append(
+                f"{path}.feeds_from_role_id: must be a role id or null, got {feeds!r}"
+            )
         seq = idx.get("seq_id")
         if seq is not None and not isinstance(seq, str):
             problems.append(f"{path}.seq_id: must be a string or null, got {seq!r}")

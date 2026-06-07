@@ -44,19 +44,31 @@ class SkillEvalSetTest(unittest.TestCase):
                 template = ROOT / case["template"]
                 self.assertTrue(template.is_file(), template)
                 self.assertEqual(
-                    main([
-                        "extract",
-                        "--name",
-                        case["brand"],
-                        "--template",
-                        str(template),
-                        "--scope",
-                        "project",
-                    ]),
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            case["brand"],
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
                     0,
                 )
                 self.assertEqual(
-                    main(["verify", "--name", case["brand"], "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "verify",
+                            "--name",
+                            case["brand"],
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     0,
                 )
                 if case.get("comprehension"):
@@ -66,34 +78,38 @@ class SkillEvalSetTest(unittest.TestCase):
                         encoding="utf-8",
                     )
                     self.assertEqual(
-                        main([
-                            "comprehend",
-                            "--name",
-                            case["brand"],
-                            "--input",
-                            str(comprehension_path),
-                            "--scope",
-                            "project",
-                        ]),
+                        main(
+                            [
+                                "comprehend",
+                                "--name",
+                                case["brand"],
+                                "--input",
+                                str(comprehension_path),
+                                "--scope",
+                                "project",
+                            ]
+                        ),
                         0,
                     )
                 input_path = tmp / f"{case['id']}.json"
                 input_path.write_text(json.dumps(case["input"]), encoding="utf-8")
                 output = tmp / f"{case['id']}.{case['kind']}"
                 self.assertEqual(
-                    main([
-                        "generate",
-                        "--name",
-                        case["brand"],
-                        "--input",
-                        str(input_path),
-                        "--output",
-                        str(output),
-                        "--scope",
-                        "project",
-                        "--qa",
-                        "fast",
-                    ]),
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            case["brand"],
+                            "--input",
+                            str(input_path),
+                            "--output",
+                            str(output),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     0,
                 )
                 self.assertTrue(output.is_file())
@@ -110,7 +126,9 @@ class SkillEvalSetTest(unittest.TestCase):
 
     def _assert_docx(self, output: Path, expect: dict) -> None:
         doc = Document(output)
-        text = "\n".join(t.text for t in doc.element.iter() if t.tag.endswith("}t") and t.text)
+        text = "\n".join(
+            t.text for t in doc.element.iter() if t.tag.endswith("}t") and t.text
+        )
         for required in expect.get("required_text") or []:
             self.assertIn(required, text)
         for forbidden in expect.get("forbidden_text") or []:

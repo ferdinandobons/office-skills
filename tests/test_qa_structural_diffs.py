@@ -16,6 +16,7 @@ run on realistic OOXML, not toy inputs:
 
 Every input is a synthetic "Acme" fixture; no proprietary template is read.
 """
+
 from __future__ import annotations
 
 import os
@@ -67,7 +68,9 @@ class ComprehendInputExcerptTest(unittest.TestCase):
                 "excerpt should carry the workbook's own cell text",
             )
             # facts.styles falls back to the xlsx 'named_styles' key.
-            self.assertTrue(bundle["facts"]["styles"], "facts.styles must not be empty (CC-1)")
+            self.assertTrue(
+                bundle["facts"]["styles"], "facts.styles must not be empty (CC-1)"
+            )
 
     def test_excerpt_is_length_capped_and_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as t:
@@ -104,7 +107,9 @@ class FormulaPreservationCheckTest(unittest.TestCase):
             self.assertGreater(erased, 0, "fixture must contain formulas")
             findings = cd.check_formula_preservation(_XLSX, out, self.PROFILE)
             self.assertEqual(len(findings), erased)
-            self.assertTrue(all(f.severity == schema.Severity.ERROR.value for f in findings))
+            self.assertTrue(
+                all(f.severity == schema.Severity.ERROR.value for f in findings)
+            )
             self.assertTrue(all(f.check == "formula_preservation" for f in findings))
 
     def test_mutated_formula_is_an_error(self) -> None:
@@ -143,7 +148,13 @@ class FormulaPreservationCheckTest(unittest.TestCase):
                     if isinstance(cell.value, str) and cell.value.startswith("="):
                         cell.value = None
             wb.save(out)
-            report = run_qa(str(out), loaded.profile, mode="generate", qa="fast", shell=loaded.shell_path)
+            report = run_qa(
+                str(out),
+                loaded.profile,
+                mode="generate",
+                qa="fast",
+                shell=loaded.shell_path,
+            )
             self.assertEqual(report.verdict, schema.VerificationStatus.FAILED.value)
             self.assertTrue(
                 any(f.check == "formula_preservation" for f in report.findings),
@@ -156,7 +167,13 @@ class FormulaPreservationCheckTest(unittest.TestCase):
             loaded = _extract_xlsx(td)
             out = td / "faithful.xlsx"
             shutil.copyfile(loaded.shell_path, out)
-            report = run_qa(str(out), loaded.profile, mode="generate", qa="fast", shell=loaded.shell_path)
+            report = run_qa(
+                str(out),
+                loaded.profile,
+                mode="generate",
+                qa="fast",
+                shell=loaded.shell_path,
+            )
             self.assertFalse(
                 [f for f in report.findings if f.check == "formula_preservation"],
                 "a verbatim copy must raise no formula_preservation finding",
@@ -177,7 +194,9 @@ class ComponentSurvivalCheckTest(unittest.TestCase):
             wb.save(out)
             findings = cd.check_component_survival(_XLSX, out, profile)
             self.assertTrue(findings)
-            self.assertTrue(all(f.severity == schema.Severity.WARNING.value for f in findings))
+            self.assertTrue(
+                all(f.severity == schema.Severity.WARNING.value for f in findings)
+            )
             self.assertTrue(any("tables" in f.message for f in findings))
 
     def test_xlsx_intact_copy_no_warning(self) -> None:
@@ -198,7 +217,9 @@ class ComponentSurvivalCheckTest(unittest.TestCase):
             doc.save(out)
             findings = cd.check_component_survival(_DOCX, out, profile)
             self.assertTrue(any("tables" in f.message for f in findings))
-            self.assertTrue(all(f.severity == schema.Severity.WARNING.value for f in findings))
+            self.assertTrue(
+                all(f.severity == schema.Severity.WARNING.value for f in findings)
+            )
 
     def test_missing_file_is_a_noop(self) -> None:
         profile = {"kind": schema.Kind.XLSX.value}

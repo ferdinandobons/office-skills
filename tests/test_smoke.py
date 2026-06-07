@@ -94,22 +94,52 @@ class M1SmokeTest(unittest.TestCase):
                 _synthetic_template(template)
 
                 self.assertEqual(
-                    main(["extract", "--name", "acme", "--template", str(template), "--scope", "project"]),
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "acme",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
                     0,
                 )
 
                 profile_path = tmp_path / "brand-kit" / "acme" / "profile.json"
                 profile = json.loads(profile_path.read_text())
                 self.assertEqual(profile["kind"], "docx")
-                self.assertEqual(profile["roles"]["heading.1"]["resolver"]["type"], "named_style")
+                self.assertEqual(
+                    profile["roles"]["heading.1"]["resolver"]["type"], "named_style"
+                )
                 self.assertTrue(profile["provenance"]["shell"]["sha256"])
                 self.assertIn("artifact_catalog", profile)
-                self.assertIn("ACME Callout Info", profile["artifact_catalog"]["styles"]["paragraph"])
-                self.assertIn("word/styles.xml", profile["artifact_catalog"]["ooxml_parts"])
+                self.assertIn(
+                    "ACME Callout Info",
+                    profile["artifact_catalog"]["styles"]["paragraph"],
+                )
+                self.assertIn(
+                    "word/styles.xml", profile["artifact_catalog"]["ooxml_parts"]
+                )
                 self.assertIn("capabilities", profile)
                 self.assertTrue(profile["capabilities"]["extracts_all_ooxml_parts"])
 
-                self.assertEqual(main(["verify", "--name", "acme", "--scope", "project", "--qa", "fast"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "verify",
+                            "--name",
+                            "acme",
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
+                    0,
+                )
 
                 idoc = tmp_path / "idoc.json"
                 idoc.write_text(
@@ -118,15 +148,34 @@ class M1SmokeTest(unittest.TestCase):
                             "cover": {"title": "Quarterly Review"},
                             "blocks": [
                                 {"type": "heading", "level": 1, "text": "Highlights"},
-                                {"type": "paragraph", "text": "Revenue grew without markdown literals."},
-                                {"type": "callout", "intent": "info", "text": "Use the brand callout style."},
-                                {"type": "quote", "text": "A short quotation uses the quote role when available."},
-                                {"type": "caption", "text": "Figure 1. Branded caption."},
-                                {"type": "list", "items": [{"text": "Keep the shell brand."}]},
+                                {
+                                    "type": "paragraph",
+                                    "text": "Revenue grew without markdown literals.",
+                                },
+                                {
+                                    "type": "callout",
+                                    "intent": "info",
+                                    "text": "Use the brand callout style.",
+                                },
+                                {
+                                    "type": "quote",
+                                    "text": "A short quotation uses the quote role when available.",
+                                },
+                                {
+                                    "type": "caption",
+                                    "text": "Figure 1. Branded caption.",
+                                },
+                                {
+                                    "type": "list",
+                                    "items": [{"text": "Keep the shell brand."}],
+                                },
                                 {
                                     "type": "table",
                                     "columns": ["Area", "Status"],
-                                    "rows": [["Pipeline", "Healthy"], ["Delivery", "Green"]],
+                                    "rows": [
+                                        ["Pipeline", "Healthy"],
+                                        ["Delivery", "Green"],
+                                    ],
                                 },
                             ],
                         }
@@ -159,7 +208,9 @@ class M1SmokeTest(unittest.TestCase):
                 text = "\n".join(p.text for p in generated.paragraphs)
                 self.assertIn("Quarterly Review", text)
                 self.assertIn("Highlights", text)
-                self.assertIn("A short quotation uses the quote role when available.", text)
+                self.assertIn(
+                    "A short quotation uses the quote role when available.", text
+                )
                 self.assertIn("Figure 1. Branded caption.", text)
                 self.assertNotIn("Example first-level title", text)
                 self.assertNotIn("General instructions", text)
@@ -174,7 +225,9 @@ class M1SmokeTest(unittest.TestCase):
                 "provenance": {},
             }
             with self.assertRaises(store.ProfileStoreError):
-                store.save_profile(root, profile, b"fake", extra_files={"../escape.txt": "nope"})
+                store.save_profile(
+                    root, profile, b"fake", extra_files={"../escape.txt": "nope"}
+                )
 
     def test_m2_extract_verify_generate_pptx(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -185,10 +238,27 @@ class M1SmokeTest(unittest.TestCase):
                 template = tmp_path / "synthetic-template.pptx"
                 _synthetic_pptx_template(template)
 
-                self.assertEqual(main(["extract", "--name", "deck", "--template", str(template), "--scope", "project"]), 0)
-                profile = json.loads((tmp_path / "brand-kit" / "deck" / "profile.json").read_text())
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "deck",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
+                profile = json.loads(
+                    (tmp_path / "brand-kit" / "deck" / "profile.json").read_text()
+                )
                 self.assertEqual(profile["kind"], "pptx")
-                self.assertEqual(profile["roles"]["cover.title"]["resolver"]["type"], "placeholder")
+                self.assertEqual(
+                    profile["roles"]["cover.title"]["resolver"]["type"], "placeholder"
+                )
                 self.assertIn("artifact_catalog", profile)
                 self.assertIn("slide_layouts", profile["artifact_catalog"])
                 self.assertTrue(profile["artifact_catalog"]["slide_layouts"])
@@ -209,13 +279,45 @@ class M1SmokeTest(unittest.TestCase):
                     encoding="utf-8",
                 )
                 out = tmp_path / "out.pptx"
-                self.assertEqual(main(["verify", "--name", "deck", "--scope", "project", "--qa", "fast"]), 0)
                 self.assertEqual(
-                    main(["generate", "--name", "deck", "--input", str(idoc), "--output", str(out), "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "verify",
+                            "--name",
+                            "deck",
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            "deck",
+                            "--input",
+                            str(idoc),
+                            "--output",
+                            str(out),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     0,
                 )
                 prs = Presentation(out)
-                text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text"))
+                text = "\n".join(
+                    shape.text
+                    for slide in prs.slides
+                    for shape in slide.shapes
+                    if hasattr(shape, "text")
+                )
                 self.assertIn("Board Update", text)
                 self.assertIn("Highlights", text)
                 self.assertNotIn("Example slide instructions", text)
@@ -230,7 +332,20 @@ class M1SmokeTest(unittest.TestCase):
             try:
                 template = tmp_path / "synthetic-template.pptx"
                 _synthetic_pptx_template(template)
-                self.assertEqual(main(["extract", "--name", "deck", "--template", str(template), "--scope", "project"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "deck",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
                 idoc = tmp_path / "deck-long.json"
                 idoc.write_text(
                     json.dumps(
@@ -238,7 +353,10 @@ class M1SmokeTest(unittest.TestCase):
                             "cover": {"title": "Long Update"},
                             "blocks": [
                                 {"type": "heading", "level": 1, "text": "Long Section"},
-                                {"type": "paragraph", "text": " ".join(["capacity"] * 420)},
+                                {
+                                    "type": "paragraph",
+                                    "text": " ".join(["capacity"] * 420),
+                                },
                             ],
                         }
                     ),
@@ -246,7 +364,21 @@ class M1SmokeTest(unittest.TestCase):
                 )
                 out = tmp_path / "long.pptx"
                 self.assertEqual(
-                    main(["generate", "--name", "deck", "--input", str(idoc), "--output", str(out), "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            "deck",
+                            "--input",
+                            str(idoc),
+                            "--output",
+                            str(out),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     0,
                 )
                 prs = Presentation(out)
@@ -263,30 +395,64 @@ class M1SmokeTest(unittest.TestCase):
                 template = tmp_path / "synthetic-template.xlsx"
                 _synthetic_xlsx_template(template)
 
-                self.assertEqual(main(["extract", "--name", "model", "--template", str(template), "--scope", "project"]), 0)
-                profile = json.loads((tmp_path / "brand-kit" / "model" / "profile.json").read_text())
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "model",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
+                profile = json.loads(
+                    (tmp_path / "brand-kit" / "model" / "profile.json").read_text()
+                )
                 self.assertEqual(profile["kind"], "xlsx")
                 # De-literalized: no privileged "title" role. Every named range is a
                 # generic ``named_range`` role keyed by its slugified own name. The
                 # author's range names ("title_cell"/"data_region") are DATA carried
                 # as ids, never code-side matching literals.
-                self.assertEqual(profile["roles"]["region.titlecell"]["resolver"]["type"], "named_range")
-                self.assertEqual(profile["roles"]["region.titlecell"]["resolver"]["name"], "title_cell")
-                self.assertEqual(profile["roles"]["region.dataregion"]["resolver"]["type"], "named_range")
+                self.assertEqual(
+                    profile["roles"]["region.titlecell"]["resolver"]["type"],
+                    "named_range",
+                )
+                self.assertEqual(
+                    profile["roles"]["region.titlecell"]["resolver"]["name"],
+                    "title_cell",
+                )
+                self.assertEqual(
+                    profile["roles"]["region.dataregion"]["resolver"]["type"],
+                    "named_range",
+                )
                 # Format-uniform comprehension inventories (geometry evidence only).
                 surface = profile["surface"]["xlsx"]
                 anchors_by_name = {a["name"]: a for a in surface["cover_anchors"]}
-                self.assertEqual(anchors_by_name["title_cell"]["cardinality"], "single_cell")
-                self.assertEqual(anchors_by_name["title_cell"]["demo_value"], "{{title}}")
-                self.assertEqual(anchors_by_name["data_region"]["cardinality"], "multi_cell")
-                self.assertEqual(surface["fields"], [])  # legal-empty xlsx field inventory
+                self.assertEqual(
+                    anchors_by_name["title_cell"]["cardinality"], "single_cell"
+                )
+                self.assertEqual(
+                    anchors_by_name["title_cell"]["demo_value"], "{{title}}"
+                )
+                self.assertEqual(
+                    anchors_by_name["data_region"]["cardinality"], "multi_cell"
+                )
+                self.assertEqual(
+                    surface["fields"], []
+                )  # legal-empty xlsx field inventory
                 region_ids = {r["id"] for r in surface["regions"]}
                 self.assertIn("region.dataregion", region_ids)  # multi-cell sample-data
                 self.assertTrue(any(r["kind"] == "sheet" for r in surface["regions"]))
                 self.assertIn("artifact_catalog", profile)
                 self.assertIn("formulas", profile["artifact_catalog"])
                 self.assertIn("Report!B5", profile["artifact_catalog"]["formulas"])
-                self.assertIn("data_region", profile["artifact_catalog"]["named_ranges"])
+                self.assertIn(
+                    "data_region", profile["artifact_catalog"]["named_ranges"]
+                )
                 self.assertIn("capabilities", profile)
                 self.assertTrue(profile["capabilities"]["preserves_formulas_in_shell"])
 
@@ -301,9 +467,36 @@ class M1SmokeTest(unittest.TestCase):
                     encoding="utf-8",
                 )
                 out = tmp_path / "out.xlsx"
-                self.assertEqual(main(["verify", "--name", "model", "--scope", "project", "--qa", "fast"]), 0)
                 self.assertEqual(
-                    main(["generate", "--name", "model", "--input", str(grid), "--output", str(out), "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "verify",
+                            "--name",
+                            "model",
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            "model",
+                            "--input",
+                            str(grid),
+                            "--output",
+                            str(out),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     0,
                 )
                 wb = load_workbook(out, data_only=False)
@@ -326,7 +519,20 @@ class M1SmokeTest(unittest.TestCase):
             try:
                 template = tmp_path / "synthetic-template.xlsx"
                 _synthetic_xlsx_template(template)
-                self.assertEqual(main(["extract", "--name", "model", "--template", str(template), "--scope", "project"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "model",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
                 grid = tmp_path / "grid-overrun.json"
                 grid.write_text(
                     json.dumps({"regions": {"data_region": [["A", 1], ["B", 2]]}}),
@@ -334,7 +540,21 @@ class M1SmokeTest(unittest.TestCase):
                 )
                 out = tmp_path / "overrun.xlsx"
                 self.assertEqual(
-                    main(["generate", "--name", "model", "--input", str(grid), "--output", str(out), "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            "model",
+                            "--input",
+                            str(grid),
+                            "--output",
+                            str(out),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     1,
                 )
                 self.assertFalse(out.exists())
@@ -349,12 +569,41 @@ class M1SmokeTest(unittest.TestCase):
             try:
                 template = tmp_path / "synthetic-template.xlsx"
                 _synthetic_xlsx_template(template)
-                self.assertEqual(main(["extract", "--name", "model", "--template", str(template), "--scope", "project"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "model",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
                 grid = tmp_path / "grid-unknown.json"
-                grid.write_text(json.dumps({"cells": {"missing_cell": "Nope"}}), encoding="utf-8")
+                grid.write_text(
+                    json.dumps({"cells": {"missing_cell": "Nope"}}), encoding="utf-8"
+                )
                 out = tmp_path / "unknown.xlsx"
                 self.assertEqual(
-                    main(["generate", "--name", "model", "--input", str(grid), "--output", str(out), "--scope", "project", "--qa", "fast"]),
+                    main(
+                        [
+                            "generate",
+                            "--name",
+                            "model",
+                            "--input",
+                            str(grid),
+                            "--output",
+                            str(out),
+                            "--scope",
+                            "project",
+                            "--qa",
+                            "fast",
+                        ]
+                    ),
                     1,
                 )
                 self.assertFalse(out.exists())

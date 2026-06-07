@@ -27,6 +27,7 @@ Four concerns:
    :data:`NAME_TOKEN_LEXICON` for the full anti-overfitting contract. Tokens
    cover EN/IT/FR/DE/ES.
 """
+
 from __future__ import annotations
 
 import re
@@ -107,14 +108,14 @@ def plain_run(text: str) -> list[Run]:
 # a *rendered* document (where they are always wrong), not every theoretical
 # markdown token.
 _MD_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("bold", r"\*\*[^\s*][^*]*?\*\*"),                 # **bold**
-    ("bold_underscore", r"__[^\s_][^_]*?__"),          # __bold__
+    ("bold", r"\*\*[^\s*][^*]*?\*\*"),  # **bold**
+    ("bold_underscore", r"__[^\s_][^_]*?__"),  # __bold__
     ("italic", r"(?<![\*\w])\*[^\s*][^*]*?\*(?![\*\w])"),  # *italic*
-    ("code", r"`[^`\n]+?`"),                            # `code`
-    ("heading", r"^\s{0,3}#{1,6}\s+\S"),               # ## heading (line start)
-    ("bullet", r"^\s{0,3}[-*+]\s+\S"),                 # - bullet (line start)
-    ("link", r"\[[^\]]+\]\([^)]+\)"),                  # [text](url)
-    ("table_pipe", r"^\s*\|.+\|\s*$"),                 # | a | b | table row
+    ("code", r"`[^`\n]+?`"),  # `code`
+    ("heading", r"^\s{0,3}#{1,6}\s+\S"),  # ## heading (line start)
+    ("bullet", r"^\s{0,3}[-*+]\s+\S"),  # - bullet (line start)
+    ("link", r"\[[^\]]+\]\([^)]+\)"),  # [text](url)
+    ("table_pipe", r"^\s*\|.+\|\s*$"),  # | a | b | table row
 )
 
 # MULTILINE so the line-anchored alternatives (heading/bullet/table_pipe) match
@@ -219,45 +220,133 @@ def safe_filename(value: str, *, default: str = "file") -> str:
 # The scorer matches by lowercased substring containment, so multi-word phrases
 # ("elenco puntato") and single tokens ("puce") both work.
 NAME_TOKEN_LEXICON: dict[str, frozenset[str]] = {
-    "heading": frozenset({
-        "heading", "title", "titolo", "titre", "uberschrift", "überschrift",
-        "titulo", "título", "head",
-    }),
-    "callout": frozenset({
-        "callout", "box", "riquadro", "encadre", "encadré", "kasten",
-        "caja", "cuadro", "note", "nota", "highlight", "evidenza",
-    }),
-    "list.bullet": frozenset({
-        "bullet", "elenco puntato", "elenchi puntati", "puce", "puces",
-        "aufzahlung", "aufzählung", "vineta", "viñeta", "list", "elenco",
-        "liste", "lista",
-    }),
-    "list.number": frozenset({
-        "number", "numbered", "numerato", "numerique", "numérique",
-        "nummeriert", "numerada", "ordered", "ordinato", "ordnung",
-    }),
-    "table": frozenset({
-        "table", "tabella", "tableau", "tabelle", "tabla", "grid", "griglia",
-    }),
-    "caption": frozenset({
-        "caption", "didascalia", "legende", "légende", "beschriftung",
-        "leyenda", "figure", "figura",
-    }),
-    "quote": frozenset({
-        "quote", "citazione", "citation", "zitat", "cita", "blockquote",
-    }),
-    "cover": frozenset({
-        "cover", "copertina", "couverture", "deckblatt", "portada",
-        "title page", "frontespizio",
-    }),
-    "toc": frozenset({
-        "toc", "contents", "sommario", "indice", "table of contents",
-        "inhaltsverzeichnis", "tabla de contenido",
-    }),
-    "kpi": frozenset({
-        "kpi", "metric", "metrica", "metrik", "stat", "indicator",
-        "indicatore", "indicador",
-    }),
+    "heading": frozenset(
+        {
+            "heading",
+            "title",
+            "titolo",
+            "titre",
+            "uberschrift",
+            "überschrift",
+            "titulo",
+            "título",
+            "head",
+        }
+    ),
+    "callout": frozenset(
+        {
+            "callout",
+            "box",
+            "riquadro",
+            "encadre",
+            "encadré",
+            "kasten",
+            "caja",
+            "cuadro",
+            "note",
+            "nota",
+            "highlight",
+            "evidenza",
+        }
+    ),
+    "list.bullet": frozenset(
+        {
+            "bullet",
+            "elenco puntato",
+            "elenchi puntati",
+            "puce",
+            "puces",
+            "aufzahlung",
+            "aufzählung",
+            "vineta",
+            "viñeta",
+            "list",
+            "elenco",
+            "liste",
+            "lista",
+        }
+    ),
+    "list.number": frozenset(
+        {
+            "number",
+            "numbered",
+            "numerato",
+            "numerique",
+            "numérique",
+            "nummeriert",
+            "numerada",
+            "ordered",
+            "ordinato",
+            "ordnung",
+        }
+    ),
+    "table": frozenset(
+        {
+            "table",
+            "tabella",
+            "tableau",
+            "tabelle",
+            "tabla",
+            "grid",
+            "griglia",
+        }
+    ),
+    "caption": frozenset(
+        {
+            "caption",
+            "didascalia",
+            "legende",
+            "légende",
+            "beschriftung",
+            "leyenda",
+            "figure",
+            "figura",
+        }
+    ),
+    "quote": frozenset(
+        {
+            "quote",
+            "citazione",
+            "citation",
+            "zitat",
+            "cita",
+            "blockquote",
+        }
+    ),
+    "cover": frozenset(
+        {
+            "cover",
+            "copertina",
+            "couverture",
+            "deckblatt",
+            "portada",
+            "title page",
+            "frontespizio",
+        }
+    ),
+    "toc": frozenset(
+        {
+            "toc",
+            "contents",
+            "sommario",
+            "indice",
+            "table of contents",
+            "inhaltsverzeichnis",
+            "tabla de contenido",
+        }
+    ),
+    "kpi": frozenset(
+        {
+            "kpi",
+            "metric",
+            "metrica",
+            "metrik",
+            "stat",
+            "indicator",
+            "indicatore",
+            "indicador",
+        }
+    ),
 }
 
 # Generic company-name noise tokens are NOT hardcoded here (the noise-token

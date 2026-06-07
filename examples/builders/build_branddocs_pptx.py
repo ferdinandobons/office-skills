@@ -57,6 +57,7 @@ yields a byte-identical file (CI-friendly).
 Run:
     PYTHONPATH=scripts .venv/bin/python examples/builders/build_branddocs_pptx.py
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -87,11 +88,11 @@ BRAND_SLATE = RGBColor(0x57, 0x78, 0xB0)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
 # Default-template layout indices (verified against python-pptx 1.x default).
-LO_TITLE = 0          # Title Slide      : CENTER_TITLE + SUBTITLE + date/footer/num
+LO_TITLE = 0  # Title Slide      : CENTER_TITLE + SUBTITLE + date/footer/num
 LO_TITLE_CONTENT = 1  # Title and Content: TITLE + OBJECT body
-LO_SECTION = 2        # Section Header   : TITLE + BODY
-LO_TITLE_ONLY = 5     # Title Only       : TITLE only
-LO_PIC_CAPTION = 8    # Picture w/Caption: TITLE + PICTURE + BODY
+LO_SECTION = 2  # Section Header   : TITLE + BODY
+LO_TITLE_ONLY = 5  # Title Only       : TITLE only
+LO_PIC_CAPTION = 8  # Picture w/Caption: TITLE + PICTURE + BODY
 
 # The exact default-template prompt string that the BODY/TITLE placeholders
 # carry. A demo slide's only text must EQUAL one of these for the extractor's
@@ -156,7 +157,9 @@ def _add_band(slide, left, top, width, height, color):
     return r
 
 
-def _add_stat_card(slide, left, top, width, height, value, label, *, color, invert=False):
+def _add_stat_card(
+    slide, left, top, width, height, value, label, *, color, invert=False
+):
     """Add a branded KPI card with value + label text."""
     box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
     box.fill.solid()
@@ -207,14 +210,27 @@ def _add_cover(prs, png_path: Path):
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
     # Keep ALL 5 placeholders filled (cover_anchors >= 5); nudge the title/subtitle
     # up into a tidier stack below the header band. (P7)
-    _set_text(ph[0], "BrandDocs Corp Quarterly Business Review", size=40, bold=True, color=BRAND_NAVY)
+    _set_text(
+        ph[0],
+        "BrandDocs Corp Quarterly Business Review",
+        size=40,
+        bold=True,
+        color=BRAND_NAVY,
+    )
     ph[0].left, ph[0].top, ph[0].width = Emu(182880), Emu(2057400), Emu(5943600)
-    _set_text(ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=BRAND_TEAL)
+    _set_text(
+        ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=BRAND_TEAL
+    )
     ph[1].left, ph[1].top, ph[1].width = Emu(685800), Emu(3429000), Emu(5486400)
     if 10 in ph:  # DATE placeholder
         _set_text(ph[10], "January 15, 2026", size=12, color=BRAND_SLATE)
     if 11 in ph:  # FOOTER placeholder
-        _set_text(ph[11], "BrandDocs Corp - Confidential (synthetic sample)", size=12, color=BRAND_SLATE)
+        _set_text(
+            ph[11],
+            "BrandDocs Corp - Confidential (synthetic sample)",
+            size=12,
+            color=BRAND_SLATE,
+        )
     if 12 in ph:  # SLIDE_NUMBER placeholder
         _set_text(ph[12], "1", size=12, color=BRAND_SLATE)
     # Thin amber rule under the title. (P7)
@@ -223,12 +239,38 @@ def _add_cover(prs, png_path: Path):
     slide.shapes.add_picture(
         str(png_path), Emu(365760), Emu(548640), width=Emu(1645920), height=Emu(411480)
     )
-    _add_stat_card(slide, Emu(6903720), Emu(1371600), Emu(1943100), Emu(823000),
-                   "18%", "YoY revenue growth", color=BRAND_TEAL, invert=True)
-    _add_stat_card(slide, Emu(6903720), Emu(2453640), Emu(1943100), Emu(823000),
-                   "92", "Brand health index", color=BRAND_LIGHT)
-    _add_stat_card(slide, Emu(6903720), Emu(3535680), Emu(1943100), Emu(823000),
-                   "3", "Office formats audited", color=BRAND_AMBER, invert=True)
+    _add_stat_card(
+        slide,
+        Emu(6903720),
+        Emu(1371600),
+        Emu(1943100),
+        Emu(823000),
+        "18%",
+        "YoY revenue growth",
+        color=BRAND_TEAL,
+        invert=True,
+    )
+    _add_stat_card(
+        slide,
+        Emu(6903720),
+        Emu(2453640),
+        Emu(1943100),
+        Emu(823000),
+        "92",
+        "Brand health index",
+        color=BRAND_LIGHT,
+    )
+    _add_stat_card(
+        slide,
+        Emu(6903720),
+        Emu(3535680),
+        Emu(1943100),
+        Emu(823000),
+        "3",
+        "Office formats audited",
+        color=BRAND_AMBER,
+        invert=True,
+    )
     return slide
 
 
@@ -246,16 +288,28 @@ def _add_agenda(prs, section_names):
     # body top=3.18in), which overlaps. Re-stack the SAME two placeholders into a
     # clean title -> body order (override the layout coords). (P1)
     ph[0].left, ph[0].top, ph[0].width, ph[0].height = (
-        Emu(685800), Emu(2057400), Emu(7772400), Emu(1143000))
+        Emu(685800),
+        Emu(2057400),
+        Emu(7772400),
+        Emu(1143000),
+    )
     ph[1].left, ph[1].top, ph[1].width, ph[1].height = (
-        Emu(685800), Emu(3429000), Emu(7772400), Emu(2286000))
+        Emu(685800),
+        Emu(3429000),
+        Emu(7772400),
+        Emu(2286000),
+    )
     # Left amber accent bar (decoration only, no text). (P2)
     _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), BRAND_AMBER)
     _set_text(ph[0], "Agenda", size=36, bold=True, color=BRAND_NAVY)
     # Anchor the body to the TOP of its frame so the list sits right below the
     # title instead of dropping to the bottom of the tall body box. (residual fix)
     ph[1].text_frame.vertical_anchor = MSO_ANCHOR.TOP
-    _bullets(ph[1], [(f"{i+1}. {name}", 0) for i, name in enumerate(section_names)], size=20)
+    _bullets(
+        ph[1],
+        [(f"{i + 1}. {name}", 0) for i, name in enumerate(section_names)],
+        size=20,
+    )
     return slide
 
 
@@ -268,7 +322,10 @@ def _add_content_text(prs):
     _bullets(
         ph[1],
         [
-            ("BrandDocs Corp grew net revenue 18% YoY across all three reported regions.", 0),
+            (
+                "BrandDocs Corp grew net revenue 18% YoY across all three reported regions.",
+                0,
+            ),
             ("Gross margin expanded 230 bps on supply-chain efficiencies.", 0),
             ("North region led growth; East rebounded after Q1 softness.", 1),
             ("FY2026 outlook raised on a stronger services pipeline.", 0),
@@ -312,7 +369,10 @@ def _add_kpi_dashboard(prs):
     chart_data.add_series("Adoption", (61, 66, 70, 76, 81, 86))
     gframe = slide.shapes.add_chart(
         XL_CHART_TYPE.LINE_MARKERS,
-        Emu(685800), Emu(2926080), Emu(5486400), Emu(2743200),
+        Emu(685800),
+        Emu(2926080),
+        Emu(5486400),
+        Emu(2743200),
         chart_data,
     )
     chart = gframe.chart
@@ -323,7 +383,9 @@ def _add_kpi_dashboard(prs):
     for ser, col in zip(chart.plots[0].series, (BRAND_TEAL, BRAND_AMBER)):
         ser.format.line.color.rgb = col
         ser.format.line.width = Pt(2.25)
-    call = slide.shapes.add_textbox(Emu(6537960), Emu(3017520), Emu(2286000), Emu(2286000))
+    call = slide.shapes.add_textbox(
+        Emu(6537960), Emu(3017520), Emu(2286000), Emu(2286000)
+    )
     tf = call.text_frame
     tf.word_wrap = True
     tf.margin_left = Emu(137160)
@@ -348,7 +410,9 @@ def _add_content_table(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=BRAND_NAVY)
+    _set_text(
+        ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=BRAND_NAVY
+    )
 
     rows, cols = 5, 5
     # Table spans 2.0-5.0in vertically: top=2.0in, height=3.0in, leaving a clean
@@ -401,7 +465,9 @@ def _add_risk_heatmap(prs):
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
     _set_text(ph[0], "Risk & Readiness Heatmap", size=28, bold=True, color=BRAND_NAVY)
     rows, cols = 5, 4
-    gtable = slide.shapes.add_table(rows, cols, Emu(685800), Emu(1600200), Emu(7772400), Emu(3657600))
+    gtable = slide.shapes.add_table(
+        rows, cols, Emu(685800), Emu(1600200), Emu(7772400), Emu(3657600)
+    )
     table = gtable.table
     headers = ["Area", "Signal", "Readiness", "Action"]
     body = [
@@ -440,7 +506,9 @@ def _add_chart(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=BRAND_NAVY)
+    _set_text(
+        ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=BRAND_NAVY
+    )
 
     chart_data = CategoryChartData()
     chart_data.categories = ["Q1", "Q2", "Q3", "Q4"]
@@ -490,16 +558,26 @@ def _add_picture_slide(prs, png_path: Path):
             # Zero the crop python-pptx applies when fitting -> undistorted.
             pic.crop_left = pic.crop_right = pic.crop_top = pic.crop_bottom = 0
             pic.left, pic.top, pic.width, pic.height = (
-                Emu(1828800), Emu(1371600), Emu(4754880), Emu(1188720))
+                Emu(1828800),
+                Emu(1371600),
+                Emu(4754880),
+                Emu(1188720),
+            )
         except Exception:
             slide.shapes.add_picture(
-                str(png_path), Emu(1828800), Emu(1371600),
-                width=Emu(4754880), height=Emu(1188720),
+                str(png_path),
+                Emu(1828800),
+                Emu(1371600),
+                width=Emu(4754880),
+                height=Emu(1188720),
             )
     else:
         slide.shapes.add_picture(
-            str(png_path), Emu(1828800), Emu(1371600),
-            width=Emu(4754880), height=Emu(1188720),
+            str(png_path),
+            Emu(1828800),
+            Emu(1371600),
+            width=Emu(4754880),
+            height=Emu(1188720),
         )
     # Reposition the TITLE and caption BODY into a tidy stack below the picture
     # box (bottom ~3.5in). All three placeholders stay present/filled. (P12)
@@ -509,8 +587,10 @@ def _add_picture_slide(prs, png_path: Path):
         ph[2].top = Emu(4114800)
         _bullets(
             ph[2],
-            [("A synthetic, generated logo - no proprietary asset.", 0),
-             ("The logo is simply the BrandDocs name, with no icon or badge.", 0)],
+            [
+                ("A synthetic, generated logo - no proprietary asset.", 0),
+                ("The logo is simply the BrandDocs name, with no icon or badge.", 0),
+            ],
             size=16,
         )
     # A second, free-floating copy via add_picture to exercise that path too.
@@ -530,7 +610,13 @@ def _add_smartart_approx(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Our Approach (SmartArt-style process)", size=28, bold=True, color=BRAND_NAVY)
+    _set_text(
+        ph[0],
+        "Our Approach (SmartArt-style process)",
+        size=28,
+        bold=True,
+        color=BRAND_NAVY,
+    )
 
     steps = [
         ("Discover", BRAND_NAVY, "Validate the opportunity"),
@@ -548,8 +634,8 @@ def _add_smartart_approx(prs):
         box.fill.solid()
         box.fill.fore_color.rgb = color
         box.line.color.rgb = BRAND_SLATE
-        box.line.width = Pt(1.5)       # crisper outline (P9)
-        box.shadow.inherit = False     # flat, no default shadow (P9)
+        box.line.width = Pt(1.5)  # crisper outline (P9)
+        box.shadow.inherit = False  # flat, no default shadow (P9)
         tf = box.text_frame
         tf.word_wrap = True
         tf.vertical_anchor = MSO_ANCHOR.MIDDLE
@@ -568,7 +654,9 @@ def _add_smartart_approx(prs):
             conn.line.width = Pt(2.5)
         # Per-box sub-label as a separate borderless textbox below the box (this is
         # a structural slide, not the demo slide, so authored text is fine). (P9)
-        cap = slide.shapes.add_textbox(x, Emu(int(top) + int(box_h) + 91440), box_w, Emu(457200))
+        cap = slide.shapes.add_textbox(
+            x, Emu(int(top) + int(box_h) + 91440), box_w, Emu(457200)
+        )
         ctf = cap.text_frame
         ctf.word_wrap = True
         cp = ctf.paragraphs[0]
@@ -601,7 +689,11 @@ def _add_demo_slide(prs):
     title = slide.placeholders[0]
     # Re-read the live prompt so this stays correct if the template changes.
     layout_title = layout.placeholders[0]
-    prompt = (layout_title.text or "").strip() if getattr(layout_title, "has_text_frame", False) else ""
+    prompt = (
+        (layout_title.text or "").strip()
+        if getattr(layout_title, "has_text_frame", False)
+        else ""
+    )
     title.text_frame.text = prompt or TITLE_PROMPT
     return slide
 
@@ -614,9 +706,17 @@ def _add_closing(prs):
     # Re-stack the SAME two Section Header placeholders into a clean title -> body
     # order (override the overlapping default layout coords). (P1)
     ph[0].left, ph[0].top, ph[0].width, ph[0].height = (
-        Emu(685800), Emu(2057400), Emu(7772400), Emu(1143000))
+        Emu(685800),
+        Emu(2057400),
+        Emu(7772400),
+        Emu(1143000),
+    )
     ph[1].left, ph[1].top, ph[1].width, ph[1].height = (
-        Emu(685800), Emu(3429000), Emu(7772400), Emu(2286000))
+        Emu(685800),
+        Emu(3429000),
+        Emu(7772400),
+        Emu(2286000),
+    )
     # Left amber accent bar (decoration only, no text). (P2)
     _add_band(slide, Emu(457200), Emu(2057400), Emu(91440), Emu(3429000), BRAND_AMBER)
     _set_text(ph[0], "Thank You", size=40, bold=True, color=BRAND_NAVY)
@@ -625,8 +725,10 @@ def _add_closing(prs):
     ph[1].text_frame.vertical_anchor = MSO_ANCHOR.TOP
     _bullets(
         ph[1],
-        [("Questions? hello@branddocs.example", 0),
-         ("BrandDocs Corp - synthetic sample deck.", 0)],
+        [
+            ("Questions? hello@branddocs.example", 0),
+            ("BrandDocs Corp - synthetic sample deck.", 0),
+        ],
         size=18,
     )
     return slide
@@ -646,7 +748,6 @@ def _inject_sections(prs, sections) -> None:
     """
     pres = prs.part._element  # <p:presentation>
     p_ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
-    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     # Map slide index -> the sldId 'id' attribute (PowerPoint section sldId uses it).
     sld_id_lst = pres.find(f"{{{p_ns}}}sldIdLst")
@@ -707,17 +808,17 @@ def build(out: Path = OUT) -> Path:
     section_names = ["Overview", "Financials", "Closing"]
 
     # --- Build slides in deck order; collect their 0-based indices. -----------
-    s0 = _add_cover(prs, tmp_png)                 # 0 cover
-    s1 = _add_agenda(prs, section_names)          # 1 agenda / section list
-    s2 = _add_content_text(prs)                   # 2 content-text
-    s3 = _add_kpi_dashboard(prs)                  # 3 KPI dashboard + native line chart
-    s4 = _add_content_table(prs)                  # 4 content-table (native table)
-    s5 = _add_chart(prs)                          # 5 native clustered-bar chart
-    s6 = _add_risk_heatmap(prs)                   # 6 native heatmap table
-    s7 = _add_picture_slide(prs, tmp_png)         # 7 picture
-    s8 = _add_smartart_approx(prs)                # 8 grouped-shape "SmartArt"
-    s9 = _add_demo_slide(prs)                     # 9 DEMO (prompt-only text)
-    s10 = _add_closing(prs)                       # 10 closing
+    s0 = _add_cover(prs, tmp_png)  # 0 cover
+    _add_agenda(prs, section_names)  # 1 agenda / section list
+    s2 = _add_content_text(prs)  # 2 content-text
+    s3 = _add_kpi_dashboard(prs)  # 3 KPI dashboard + native line chart
+    s4 = _add_content_table(prs)  # 4 content-table (native table)
+    s5 = _add_chart(prs)  # 5 native clustered-bar chart
+    s6 = _add_risk_heatmap(prs)  # 6 native heatmap table
+    s7 = _add_picture_slide(prs, tmp_png)  # 7 picture
+    s8 = _add_smartart_approx(prs)  # 8 grouped-shape "SmartArt"
+    s9 = _add_demo_slide(prs)  # 9 DEMO (prompt-only text)
+    s10 = _add_closing(prs)  # 10 closing
     _ = (s0, s2, s3, s4, s5, s6, s7, s8, s9, s10)
 
     # --- Inject the real PowerPoint section list (lxml). ----------------------

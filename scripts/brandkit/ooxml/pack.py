@@ -23,6 +23,7 @@ The shell, however, is copied **verbatim** elsewhere (never round-tripped) to
 preserve themes/numbering/fonts exactly; this module is for parts we deliberately
 rewrite.
 """
+
 from __future__ import annotations
 
 import os
@@ -87,8 +88,9 @@ def parse_xml_bytes(data: bytes) -> etree._Element:
     return etree.fromstring(data, parser=parser)
 
 
-def serialize_xml(element: etree._Element, *, xml_declaration: bool = True,
-                  standalone: bool = True) -> bytes:
+def serialize_xml(
+    element: etree._Element, *, xml_declaration: bool = True, standalone: bool = True
+) -> bytes:
     """Serialize an lxml element back to OOXML-flavoured bytes (UTF-8).
 
     Emits the standalone XML declaration OOXML parts expect. No pretty-printing
@@ -209,7 +211,9 @@ def pack(src_dir: PathLike, dest: PathLike, *, compresslevel: int = 6) -> Path:
         raise PackError(f"no parts found under {src}")
 
     fixed_date = (1980, 1, 1, 0, 0, 0)  # deterministic ZIP timestamp
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as zf:
+    with zipfile.ZipFile(
+        out, "w", zipfile.ZIP_DEFLATED, compresslevel=compresslevel
+    ) as zf:
         for name in _ordered_part_names(names):
             data = (src / name).read_bytes()
             info = zipfile.ZipInfo(name, date_time=fixed_date)

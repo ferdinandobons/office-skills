@@ -32,6 +32,7 @@ defined names, so re-running the builder yields an identical file (CI-friendly).
 Run:
     PYTHONPATH=scripts .venv/bin/python tests/fixtures/builders/build_complex_xlsx.py
 """
+
 from __future__ import annotations
 
 import struct
@@ -39,7 +40,7 @@ import zlib
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, LineChart, Reference, Series
+from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
@@ -217,7 +218,9 @@ def _build_model(wb: Workbook) -> None:
         # FY Total (col 6) = SUM of the four quarters in this row.
         ws.cell(row=r, column=6, value=f"=SUM(B{r}:E{r})").number_format = "#,##0"
         # % of FY (col 7) = this row's FY total / net-revenue FY total (row 7).
-        ws.cell(row=r, column=7, value=f"=IF($F$7=0,0,F{r}/$F$7)").number_format = "0.0%"
+        ws.cell(
+            row=r, column=7, value=f"=IF($F$7=0,0,F{r}/$F$7)"
+        ).number_format = "0.0%"
     # A grand-total SUBTOTAL row 9 (col 6).
     ws.cell(row=9, column=1, value="Subtotal (visible)")
     ws.cell(row=9, column=6, value="=SUBTOTAL(9,F4:F6)").number_format = "#,##0"
@@ -236,20 +239,26 @@ def _build_model(wb: Workbook) -> None:
     ws.conditional_formatting.add(
         "B4:E6",
         ColorScaleRule(
-            start_type="min", start_color="FFF8696B",
-            mid_type="percentile", mid_value=50, mid_color="FFFFEB84",
-            end_type="max", end_color="FF63BE7B",
+            start_type="min",
+            start_color="FFF8696B",
+            mid_type="percentile",
+            mid_value=50,
+            mid_color="FFFFEB84",
+            end_type="max",
+            end_color="FF63BE7B",
         ),
     )
     ws.conditional_formatting.add(
         "G4:G7",
-        CellIsRule(operator="greaterThan", formula=["0.5"],
-                   fill=PatternFill("solid", fgColor=ACME_AMBER)),
+        CellIsRule(
+            operator="greaterThan",
+            formula=["0.5"],
+            fill=PatternFill("solid", fgColor=ACME_AMBER),
+        ),
     )
     ws.conditional_formatting.add(
         "F4:F6",
-        FormulaRule(formula=["F4<0"],
-                    fill=PatternFill("solid", fgColor="FFFFC7CE")),
+        FormulaRule(formula=["F4<0"], fill=PatternFill("solid", fgColor="FFFFC7CE")),
     )
     ws.freeze_panes = "B4"
     for col in range(1, 8):

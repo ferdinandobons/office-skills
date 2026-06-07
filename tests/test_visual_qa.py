@@ -8,6 +8,7 @@ gate's ``--qa fast|auto|deep|strict`` semantics and the clean CI degrade are
 proven without external tools. One gated end-to-end test runs the real render
 when the binaries are present (skipped in CI).
 """
+
 from __future__ import annotations
 
 import json
@@ -78,9 +79,15 @@ class L1ProxyTest(unittest.TestCase):
     def test_default_out_dir_keeps_extension_to_avoid_format_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
-            self.assertEqual(vqa.default_out_dir(base / "out.docx"), base / "out.docx.visual")
-            self.assertEqual(vqa.default_out_dir(base / "out.pptx"), base / "out.pptx.visual")
-            self.assertEqual(vqa.default_out_dir(base / "out.xlsx"), base / "out.xlsx.visual")
+            self.assertEqual(
+                vqa.default_out_dir(base / "out.docx"), base / "out.docx.visual"
+            )
+            self.assertEqual(
+                vqa.default_out_dir(base / "out.pptx"), base / "out.pptx.visual"
+            )
+            self.assertEqual(
+                vqa.default_out_dir(base / "out.xlsx"), base / "out.xlsx.visual"
+            )
 
     def test_blank_page_flagged(self) -> None:
         findings = vqa.check_blank_page(_blank(), page_index=0)
@@ -96,7 +103,9 @@ class L1ProxyTest(unittest.TestCase):
         findings = vqa.check_edge_bleed(_bottom_bleed(), page_index=1)
         self.assertTrue(findings)
         self.assertTrue(all(f.check == "visual.edge_bleed" for f in findings))
-        self.assertTrue(all(f.severity == schema.Severity.WARNING.value for f in findings))
+        self.assertTrue(
+            all(f.severity == schema.Severity.WARNING.value for f in findings)
+        )
         self.assertTrue(any("bottom" in (f.location or "") for f in findings))
         self.assertTrue(any(f.location == "page:2:bottom" for f in findings))
 
@@ -138,8 +147,8 @@ class L1ProxyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p1 = Path(td) / "page-1.png"
             p2 = Path(td) / "page-2.png"
-            _blank().save(p1)           # -> blank_page on page 1
-            _bottom_bleed().save(p2)    # -> edge_bleed on page 2
+            _blank().save(p1)  # -> blank_page on page 1
+            _bottom_bleed().save(p2)  # -> edge_bleed on page 2
             findings = vqa.run_visual_l1([p1, p2])
             checks = {f.check for f in findings}
             self.assertIn("visual.blank_page", checks)
@@ -149,9 +158,7 @@ class L1ProxyTest(unittest.TestCase):
         findings = vqa.check_page_count_sane([])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].check, "visual.no_pages")
-        self.assertEqual(
-            vqa.check_page_count_sane([_blank()]), []
-        )
+        self.assertEqual(vqa.check_page_count_sane([_blank()]), [])
 
 
 class RendererAvailabilityTest(unittest.TestCase):
@@ -161,13 +168,18 @@ class RendererAvailabilityTest(unittest.TestCase):
             doctor.probe = lambda: {
                 "python_deps": {},
                 "binaries": {"soffice": True, "pdftoppm": True},
-                "binary_paths": {"soffice": "/fake/soffice", "pdftoppm": "/fake/pdftoppm"},
+                "binary_paths": {
+                    "soffice": "/fake/soffice",
+                    "pdftoppm": "/fake/pdftoppm",
+                },
                 "binary_errors": {},
                 "visual_qa": True,
             }
 
             self.assertTrue(vqa.renderers_available())
-            self.assertEqual(vqa.last_renderer_status()["binary_paths"]["soffice"], "/fake/soffice")
+            self.assertEqual(
+                vqa.last_renderer_status()["binary_paths"]["soffice"], "/fake/soffice"
+            )
         finally:
             doctor.probe = orig_probe
 
@@ -175,7 +187,13 @@ class RendererAvailabilityTest(unittest.TestCase):
         orig_probe = doctor.probe
         try:
             doctor.probe = lambda: {
-                "python_deps": {"docx": False, "pptx": True, "openpyxl": True, "lxml": True, "PIL": True},
+                "python_deps": {
+                    "docx": False,
+                    "pptx": True,
+                    "openpyxl": True,
+                    "lxml": True,
+                    "PIL": True,
+                },
                 "optional_python_deps": {"fitz": False},
                 "binaries": {"soffice": False, "pdftoppm": False},
                 "binary_paths": {"soffice": None, "pdftoppm": None},
@@ -233,9 +251,10 @@ class RendererAvailabilityTest(unittest.TestCase):
         calls = []
         try:
             doctor.shutil.which = lambda name: f"/fake/{name}"
-            doctor._soffice_app_signature_error = (
-                lambda path: "LibreOffice.app signature invalid: bad signature"
-                if path.endswith("soffice") else None
+            doctor._soffice_app_signature_error = lambda path: (
+                "LibreOffice.app signature invalid: bad signature"
+                if path.endswith("soffice")
+                else None
             )
 
             def fake_run(args, *unused_args, **unused_kwargs):
@@ -357,7 +376,9 @@ class RendererAvailabilityTest(unittest.TestCase):
                 (outdir / f"{document.stem}.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
                 return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
             if args and Path(args[0]).name == "pdftoppm":
-                raise AssertionError("pdftoppm must not be used when rasterizer is disabled")
+                raise AssertionError(
+                    "pdftoppm must not be used when rasterizer is disabled"
+                )
             return SimpleNamespace(returncode=0, stdout=b"version ok", stderr=b"")
 
         def fake_pymupdf(pdf: Path, png_dir: Path, *, dpi: int):
@@ -389,7 +410,12 @@ def _extract_real_profile(td: Path) -> dict:
     from brandkit.formats.docx import extract as docx_extract
     from brandkit.profile import store
 
-    template = Path(__file__).resolve().parents[1] / "examples" / "templates" / "branddocs_template.docx"
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "templates"
+        / "branddocs_template.docx"
+    )
     docx_extract.extract(template, "vqa", scope="project", cwd=td)
     return store.load_profile("vqa", "project", cwd=td).profile
 
@@ -428,11 +454,18 @@ class ManifestTest(unittest.TestCase):
                 png_paths.append(p)
             l1 = vqa.run_visual_l1(png_paths)
             manifest_path = vqa.build_visual_manifest(
-                profile=profile, document=td / "out.docx", png_paths=png_paths,
-                l1_findings=l1, renderers_ok=True, out_dir=out_dir,
+                profile=profile,
+                document=td / "out.docx",
+                png_paths=png_paths,
+                l1_findings=l1,
+                renderers_ok=True,
+                out_dir=out_dir,
                 environment_status={
                     "visual_qa": True,
-                    "binary_paths": {"soffice": "/usr/bin/soffice", "pdftoppm": "/usr/bin/pdftoppm"},
+                    "binary_paths": {
+                        "soffice": "/usr/bin/soffice",
+                        "pdftoppm": "/usr/bin/pdftoppm",
+                    },
                     "binaries": {"soffice": True, "pdftoppm": True},
                     "binary_errors": {},
                     "ocr_binary_paths": {"tesseract": "/usr/bin/tesseract"},
@@ -454,10 +487,16 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(data["pages"][0]["width"], 850)
             self.assertEqual(data["pages"][0]["orientation"], "portrait")
             self.assertEqual(data["environment"]["visual_qa"], True)
-            self.assertEqual(data["environment"]["renderers"]["soffice"]["path"], "/usr/bin/soffice")
-            self.assertEqual(data["environment"]["renderers"]["pdftoppm"]["available"], True)
+            self.assertEqual(
+                data["environment"]["renderers"]["soffice"]["path"], "/usr/bin/soffice"
+            )
+            self.assertEqual(
+                data["environment"]["renderers"]["pdftoppm"]["available"], True
+            )
             self.assertIn("fitz", data["environment"]["optional_python"])
-            self.assertEqual(data["environment"]["ocr"]["tesseract"]["path"], "/usr/bin/tesseract")
+            self.assertEqual(
+                data["environment"]["ocr"]["tesseract"]["path"], "/usr/bin/tesseract"
+            )
             self.assertIn("ocr", data)
             self.assertEqual(data["ocr"]["status"], "not_run")
             self.assertIn("platform", data["environment"])
@@ -467,11 +506,11 @@ class ManifestTest(unittest.TestCase):
             profile = _extract_real_profile(Path(td))
             checklist = vqa.derive_visual_checklist(profile)
             ids = {item["id"] for item in checklist}
-            self.assertIn("regions_present", ids)   # from structure.skeleton
-            self.assertIn("cover_correct", ids)     # from anchors.cover
+            self.assertIn("regions_present", ids)  # from structure.skeleton
+            self.assertIn("cover_correct", ids)  # from anchors.cover
             self.assertIn("palette_on_brand", ids)  # from theme.colors
-            self.assertIn("roles_styled", ids)      # from roles._index
-            self.assertIn("overflow_clean", ids)    # from qa.overflow_capability=render
+            self.assertIn("roles_styled", ids)  # from roles._index
+            self.assertIn("overflow_clean", ids)  # from qa.overflow_capability=render
             # No chart in this template -> charts_rendered must be ABSENT.
             self.assertNotIn("charts_rendered", ids)
             # Every item is traceable.
@@ -493,8 +532,12 @@ class ManifestTest(unittest.TestCase):
             png = out_dir / "page-1.png"
             _centered_content().save(png)
             manifest_path = vqa.build_visual_manifest(
-                profile=profile, document=td / "out.docx", png_paths=[png],
-                l1_findings=[], renderers_ok=True, out_dir=out_dir,
+                profile=profile,
+                document=td / "out.docx",
+                png_paths=[png],
+                l1_findings=[],
+                renderers_ok=True,
+                out_dir=out_dir,
             )
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(data["pages"][0]["png"], "page-1.png")  # relative, no dir
@@ -505,8 +548,12 @@ class ManifestTest(unittest.TestCase):
             profile = _extract_real_profile(td)
             out_dir = td / "out.visual"
             manifest_path = vqa.build_visual_manifest(
-                profile=profile, document=td / "out.docx", png_paths=[],
-                l1_findings=[], renderers_ok=False, out_dir=out_dir,
+                profile=profile,
+                document=td / "out.docx",
+                png_paths=[],
+                l1_findings=[],
+                renderers_ok=False,
+                out_dir=out_dir,
             )
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertTrue(data["degraded"])
@@ -525,8 +572,12 @@ class ManifestTest(unittest.TestCase):
             _blank().save(png)
             l1 = vqa.run_visual_l1([png])
             manifest_path = vqa.build_visual_manifest(
-                profile=profile, document=td / "out.docx", png_paths=[png],
-                l1_findings=l1, renderers_ok=False, out_dir=out_dir,
+                profile=profile,
+                document=td / "out.docx",
+                png_paths=[png],
+                l1_findings=l1,
+                renderers_ok=False,
+                out_dir=out_dir,
                 degraded=True,
             )
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -567,11 +618,7 @@ class ManifestTest(unittest.TestCase):
         profile = {
             "kind": "docx",
             "surface": {
-                "docx": {
-                    "cover_anchors": [
-                        {"placeholder": "Old template subtitle"}
-                    ]
-                }
+                "docx": {"cover_anchors": [{"placeholder": "Old template subtitle"}]}
             },
         }
 
@@ -610,7 +657,9 @@ class ManifestTest(unittest.TestCase):
         orig_which = vqa.shutil.which
         orig_pymupdf = vqa._rasterize_pdf_with_pymupdf
         try:
-            vqa.shutil.which = lambda name: None if name == "pdftoppm" else orig_which(name)
+            vqa.shutil.which = lambda name: (
+                None if name == "pdftoppm" else orig_which(name)
+            )
 
             def fake_pymupdf(pdf: Path, out_dir: Path, *, dpi: int):
                 png = out_dir / "page-1.png"
@@ -681,7 +730,9 @@ class GateWiringTest(unittest.TestCase):
                 target = Path(td) / "out.docx"
                 _real_docx(target)
                 report = gate.run_qa(target, _minimal_profile(), qa="auto")
-            unavailable = [f for f in report.findings if f.check == "visual.unavailable"]
+            unavailable = [
+                f for f in report.findings if f.check == "visual.unavailable"
+            ]
             self.assertEqual(len(unavailable), 1)
             self.assertEqual(unavailable[0].severity, schema.Severity.INFO.value)
             self.assertTrue(report.passed)
@@ -703,14 +754,21 @@ class GateWiringTest(unittest.TestCase):
                 out_dir = td / "out.visual"
                 _real_docx(target)
                 report = gate.run_qa(
-                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                    target,
+                    _minimal_profile(),
+                    qa="deep",
+                    out_dir=out_dir,
                 )
-                unavailable = [f for f in report.findings if f.check == "visual.unavailable"]
+                unavailable = [
+                    f for f in report.findings if f.check == "visual.unavailable"
+                ]
                 self.assertEqual(len(unavailable), 1)
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
                 self.assertEqual(len(manifest), 1)
                 self.assertEqual(manifest[0].severity, schema.Severity.INFO.value)
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
             self.assertTrue(data["degraded"])
             self.assertEqual(data["pages"], [])
             self.assertTrue(data["checklist"])
@@ -728,7 +786,9 @@ class GateWiringTest(unittest.TestCase):
             self.assertTrue(kwargs.get("quicklook_only"))
             warnings = kwargs.get("render_warnings")
             if warnings is not None:
-                warnings.append("Quick Look thumbnail fallback used because LibreOffice is unavailable")
+                warnings.append(
+                    "Quick Look thumbnail fallback used because LibreOffice is unavailable"
+                )
             out_dir = Path(args[1])
             out_dir.mkdir(parents=True, exist_ok=True)
             png = out_dir / "page-1.png"
@@ -743,13 +803,22 @@ class GateWiringTest(unittest.TestCase):
                 out_dir = td / "out.visual"
                 _real_docx(target)
                 report = gate.run_qa(
-                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                    target,
+                    _minimal_profile(),
+                    qa="deep",
+                    out_dir=out_dir,
                 )
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
                 self.assertEqual(len(manifest), 1)
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
-            self.assertTrue(any(f.check == "visual.unavailable" for f in report.findings))
-            degraded = [f for f in report.findings if f.check == "visual.render_degraded"]
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
+            self.assertTrue(
+                any(f.check == "visual.unavailable" for f in report.findings)
+            )
+            degraded = [
+                f for f in report.findings if f.check == "visual.render_degraded"
+            ]
             self.assertEqual(len(degraded), 1)
             self.assertEqual(len(data["pages"]), 1)
             self.assertTrue(data["degraded"])
@@ -777,14 +846,21 @@ class GateWiringTest(unittest.TestCase):
                 out_dir = td / "out.visual"
                 _real_docx(target)
                 report = gate.run_qa(
-                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                    target,
+                    _minimal_profile(),
+                    qa="deep",
+                    out_dir=out_dir,
                 )
-                failed = [f for f in report.findings if f.check == "visual.render_failed"]
+                failed = [
+                    f for f in report.findings if f.check == "visual.render_failed"
+                ]
                 self.assertEqual(len(failed), 1)
                 self.assertIn("abort trap", failed[0].message)
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
                 self.assertEqual(len(manifest), 1)
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
             self.assertTrue(data["degraded"])
             self.assertTrue(report.passed)
         finally:
@@ -799,7 +875,9 @@ class GateWiringTest(unittest.TestCase):
         def fake_render(*args, **kwargs):
             warnings = kwargs.get("render_warnings")
             if warnings is not None:
-                warnings.append("Quick Look thumbnail fallback used after soffice failure")
+                warnings.append(
+                    "Quick Look thumbnail fallback used after soffice failure"
+                )
             out_dir = Path(args[1])
             out_dir.mkdir(parents=True, exist_ok=True)
             png = out_dir / "page-1.png"
@@ -814,14 +892,23 @@ class GateWiringTest(unittest.TestCase):
                 out_dir = td / "out.visual"
                 _real_docx(target)
                 report = gate.run_qa(
-                    target, _minimal_profile(), qa="deep", out_dir=out_dir,
+                    target,
+                    _minimal_profile(),
+                    qa="deep",
+                    out_dir=out_dir,
                 )
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
-            degraded = [f for f in report.findings if f.check == "visual.render_degraded"]
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
+            degraded = [
+                f for f in report.findings if f.check == "visual.render_degraded"
+            ]
             self.assertEqual(len(degraded), 1)
             self.assertIn("Quick Look", degraded[0].message)
-            self.assertFalse(any(f.check == "visual.render_failed" for f in report.findings))
+            self.assertFalse(
+                any(f.check == "visual.render_failed" for f in report.findings)
+            )
             self.assertTrue(data["degraded"])
             self.assertFalse(data["renderers_available"])
         finally:
@@ -845,12 +932,16 @@ class GateWiringTest(unittest.TestCase):
                 )
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
                 self.assertEqual(len(manifest), 1)
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
         finally:
             vqa.renderers_available = orig_available
 
         self.assertFalse(report.passed)
-        self.assertTrue(any(f.check == "visual.strict_unavailable" for f in report.findings))
+        self.assertTrue(
+            any(f.check == "visual.strict_unavailable" for f in report.findings)
+        )
         self.assertTrue(data["degraded"])
         self.assertEqual(data["qa_mode"], "strict")
 
@@ -883,7 +974,9 @@ class GateWiringTest(unittest.TestCase):
                     visual=(True, [png]),
                 )
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
         finally:
             vqa.run_visual_ocr = orig_ocr
 
@@ -902,7 +995,13 @@ class GateWiringTest(unittest.TestCase):
                 "available": True,
                 "status": "ok",
                 "terms_checked": ["Old template subtitle"],
-                "pages": [{"index": 1, "text": "Old template subtitle", "hits": [{"term": "Old template subtitle"}]}],
+                "pages": [
+                    {
+                        "index": 1,
+                        "text": "Old template subtitle",
+                        "hits": [{"term": "Old template subtitle"}],
+                    }
+                ],
                 "hits": [{"page": 1, "term": "Old template subtitle"}],
                 "errors": [],
             }
@@ -922,11 +1021,15 @@ class GateWiringTest(unittest.TestCase):
                     visual=(True, [png]),
                 )
                 manifest = [f for f in report.findings if f.check == "visual.manifest"]
-                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
+                data = json.loads(
+                    Path(manifest[0].location).read_text(encoding="utf-8")
+                )
         finally:
             vqa.run_visual_ocr = orig_ocr
 
-        self.assertTrue(any(f.check == "visual.ocr_residual_text" for f in report.findings))
+        self.assertTrue(
+            any(f.check == "visual.ocr_residual_text" for f in report.findings)
+        )
         self.assertEqual(data["ocr"]["hits"][0]["term"], "Old template subtitle")
 
     def test_render_to_pngs_can_skip_availability_recheck(self) -> None:
@@ -967,7 +1070,9 @@ class GateWiringTest(unittest.TestCase):
                 out_dir = td / "out.visual"
                 _real_docx(target)
                 pngs = vqa.render_to_pngs(
-                    target, out_dir, check_available=False,
+                    target,
+                    out_dir,
+                    check_available=False,
                 )
             self.assertEqual([p.name for p in pngs], ["page-1.png"])
         finally:
@@ -994,7 +1099,9 @@ class GateWiringTest(unittest.TestCase):
                 _centered_content().save(outdir / f"{doc.name}.png")
                 return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
             if exe == "pdftoppm":
-                raise AssertionError("pdftoppm should not run after soffice failure fallback")
+                raise AssertionError(
+                    "pdftoppm should not run after soffice failure fallback"
+                )
             return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
         subprocess.run = fake_run
@@ -1031,17 +1138,22 @@ class GateWiringTest(unittest.TestCase):
             out_dir.mkdir(parents=True, exist_ok=True)
             p1 = out_dir / "page-1.png"
             p2 = out_dir / "page-2.png"
-            _blank().save(p1)            # blank page -> L1 finding
+            _blank().save(p1)  # blank page -> L1 finding
             _centered_content().save(p2)
             target = td / "out.docx"
             _real_docx(target)
 
             report = gate.run_qa(
-                target, profile, qa="deep", out_dir=out_dir,
+                target,
+                profile,
+                qa="deep",
+                out_dir=out_dir,
                 visual=(True, [p1, p2]),
             )
             # L1 blank-page finding present.
-            self.assertTrue(any(f.check == "visual.blank_page" for f in report.findings))
+            self.assertTrue(
+                any(f.check == "visual.blank_page" for f in report.findings)
+            )
             # Manifest finding present, pointing at a written file.
             manifest = [f for f in report.findings if f.check == "visual.manifest"]
             self.assertEqual(len(manifest), 1)
@@ -1066,10 +1178,15 @@ class GateWiringTest(unittest.TestCase):
             target = td / "out.docx"
             _real_docx(target)
             report = gate.run_qa(
-                target, _minimal_profile(), qa="auto", out_dir=out_dir,
+                target,
+                _minimal_profile(),
+                qa="auto",
+                out_dir=out_dir,
                 visual=(True, [p1]),
             )
-            self.assertTrue(any(f.check == "visual.blank_page" for f in report.findings))
+            self.assertTrue(
+                any(f.check == "visual.blank_page" for f in report.findings)
+            )
             # auto does NOT emit a manifest.
             self.assertFalse(any(f.check == "visual.manifest" for f in report.findings))
 
@@ -1083,11 +1200,17 @@ class GateWiringTest(unittest.TestCase):
             target = td / "out.docx"
             _real_docx(target)
             report = gate.run_qa(
-                target, _minimal_profile(), qa="auto", out_dir=out_dir,
+                target,
+                _minimal_profile(),
+                qa="auto",
+                out_dir=out_dir,
                 visual=(True, [p1]),
             )
-            self.assertTrue(any(f.severity == schema.Severity.WARNING.value
-                                for f in report.findings))
+            self.assertTrue(
+                any(
+                    f.severity == schema.Severity.WARNING.value for f in report.findings
+                )
+            )
             self.assertEqual(
                 report.verdict, schema.VerificationStatus.PASSED_WITH_WARNINGS.value
             )
@@ -1106,7 +1229,9 @@ class GateWiringTest(unittest.TestCase):
         try:
             report = gate.run_qa(None, _minimal_profile(), mode="verify", qa="deep")
             self.assertEqual(called["n"], 0)
-            self.assertFalse(any(f.check.startswith("visual.") for f in report.findings))
+            self.assertFalse(
+                any(f.check.startswith("visual.") for f in report.findings)
+            )
         finally:
             vqa.render_to_pngs = orig
 
@@ -1155,8 +1280,7 @@ class BackwardCompatTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 def _real_render_requested() -> bool:
     return (
-        os.environ.get("BRANDDOCS_RUN_REAL_RENDER") == "1"
-        and vqa.renderers_available()
+        os.environ.get("BRANDDOCS_RUN_REAL_RENDER") == "1" and vqa.renderers_available()
     )
 
 
@@ -1170,7 +1294,9 @@ class RealRenderE2ETest(unittest.TestCase):
             td = Path(td)
             template = (
                 Path(__file__).resolve().parents[1]
-                / "examples" / "templates" / "branddocs_template.docx"
+                / "examples"
+                / "templates"
+                / "branddocs_template.docx"
             )
             out_dir = td / "render"
             pngs = vqa.render_to_pngs(template, out_dir)
@@ -1187,28 +1313,61 @@ class RealRenderE2ETest(unittest.TestCase):
             td = Path(td)
             old = Path.cwd()
             import os
+
             os.chdir(td)
             try:
                 template = (
                     Path(__file__).resolve().parents[1]
-                    / "examples" / "templates" / "branddocs_template.docx"
+                    / "examples"
+                    / "templates"
+                    / "branddocs_template.docx"
                 )
                 self.assertEqual(
-                    main(["extract", "--name", "e2e", "--template", str(template),
-                          "--scope", "project"]),
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "e2e",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
                     0,
                 )
                 idoc = td / "idoc.json"
-                idoc.write_text(json.dumps({
-                    "cover": {"title": "Visual Audit Demo"},
-                    "blocks": [
-                        {"type": "heading", "level": 1, "text": "Section"},
-                        {"type": "paragraph", "text": "Rendered for the visual audit."},
-                    ],
-                }), encoding="utf-8")
+                idoc.write_text(
+                    json.dumps(
+                        {
+                            "cover": {"title": "Visual Audit Demo"},
+                            "blocks": [
+                                {"type": "heading", "level": 1, "text": "Section"},
+                                {
+                                    "type": "paragraph",
+                                    "text": "Rendered for the visual audit.",
+                                },
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 out = td / "out.docx"
-                rc = main(["generate", "--name", "e2e", "--input", str(idoc),
-                           "--output", str(out), "--scope", "project", "--qa", "deep"])
+                rc = main(
+                    [
+                        "generate",
+                        "--name",
+                        "e2e",
+                        "--input",
+                        str(idoc),
+                        "--output",
+                        str(out),
+                        "--scope",
+                        "project",
+                        "--qa",
+                        "deep",
+                    ]
+                )
                 self.assertEqual(rc, 0)
                 visual_dir = out.parent / "out.docx.visual"
                 self.assertTrue((visual_dir / "visual_manifest.json").is_file())
@@ -1223,28 +1382,65 @@ class RealRenderE2ETest(unittest.TestCase):
             td = Path(td)
             old = Path.cwd()
             import os
+
             os.chdir(td)
             try:
                 template = (
                     Path(__file__).resolve().parents[1]
-                    / "examples" / "templates" / "branddocs_template.pptx"
+                    / "examples"
+                    / "templates"
+                    / "branddocs_template.pptx"
                 )
                 self.assertEqual(
-                    main(["extract", "--name", "deck", "--template", str(template),
-                          "--scope", "project"]),
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "deck",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
                     0,
                 )
                 idoc = td / "deck.json"
-                idoc.write_text(json.dumps({
-                    "cover": {"title": "Visual Audit Deck"},
-                    "blocks": [
-                        {"type": "heading", "level": 1, "text": "Market Context"},
-                        {"type": "paragraph", "text": "Rendered for the PPTX visual audit."},
-                    ],
-                }), encoding="utf-8")
+                idoc.write_text(
+                    json.dumps(
+                        {
+                            "cover": {"title": "Visual Audit Deck"},
+                            "blocks": [
+                                {
+                                    "type": "heading",
+                                    "level": 1,
+                                    "text": "Market Context",
+                                },
+                                {
+                                    "type": "paragraph",
+                                    "text": "Rendered for the PPTX visual audit.",
+                                },
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 out = td / "out.pptx"
-                rc = main(["generate", "--name", "deck", "--input", str(idoc),
-                           "--output", str(out), "--scope", "project", "--qa", "deep"])
+                rc = main(
+                    [
+                        "generate",
+                        "--name",
+                        "deck",
+                        "--input",
+                        str(idoc),
+                        "--output",
+                        str(out),
+                        "--scope",
+                        "project",
+                        "--qa",
+                        "deep",
+                    ]
+                )
                 self.assertEqual(rc, 0)
                 visual_dir = out.parent / "out.pptx.visual"
                 manifest = visual_dir / "visual_manifest.json"
@@ -1263,37 +1459,67 @@ class RealRenderE2ETest(unittest.TestCase):
             td = Path(td)
             old = Path.cwd()
             import os
+
             os.chdir(td)
             try:
                 template = (
                     Path(__file__).resolve().parents[1]
-                    / "examples" / "templates" / "branddocs_template.xlsx"
+                    / "examples"
+                    / "templates"
+                    / "branddocs_template.xlsx"
                 )
                 self.assertEqual(
-                    main(["extract", "--name", "book", "--template", str(template),
-                          "--scope", "project"]),
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "book",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
                     0,
                 )
                 grid = td / "grid.json"
-                grid.write_text(json.dumps({
-                    "cells": {
-                        "report_title": "Visual Audit Workbook",
-                        "report_subtitle": "Excel render proof",
-                        "client_name": "BrandDocs",
-                        "period": "FY 2026",
-                        "headline_kpi": "On-brand",
-                    },
-                    "regions": {
-                        "data_block": [
-                            ["Metric", "Q1", "Q2", "Status"],
-                            ["Pipeline", 42, 48, "Healthy"],
-                            ["Delivery", 91, 94, "Green"],
-                        ],
-                    },
-                }), encoding="utf-8")
+                grid.write_text(
+                    json.dumps(
+                        {
+                            "cells": {
+                                "report_title": "Visual Audit Workbook",
+                                "report_subtitle": "Excel render proof",
+                                "client_name": "BrandDocs",
+                                "period": "FY 2026",
+                                "headline_kpi": "On-brand",
+                            },
+                            "regions": {
+                                "data_block": [
+                                    ["Metric", "Q1", "Q2", "Status"],
+                                    ["Pipeline", 42, 48, "Healthy"],
+                                    ["Delivery", 91, 94, "Green"],
+                                ],
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 out = td / "out.xlsx"
-                rc = main(["generate", "--name", "book", "--input", str(grid),
-                           "--output", str(out), "--scope", "project", "--qa", "deep"])
+                rc = main(
+                    [
+                        "generate",
+                        "--name",
+                        "book",
+                        "--input",
+                        str(grid),
+                        "--output",
+                        str(out),
+                        "--scope",
+                        "project",
+                        "--qa",
+                        "deep",
+                    ]
+                )
                 self.assertEqual(rc, 0)
                 visual_dir = out.parent / "out.xlsx.visual"
                 manifest = visual_dir / "visual_manifest.json"

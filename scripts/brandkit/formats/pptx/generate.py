@@ -46,6 +46,7 @@ that loses a native object is visible in QA rather than silently down-rendered. 
 component-survival check (shell-vs-output native counts) backs the same guarantee
 from the QA side.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -122,7 +123,9 @@ def generate(
     resolver = ProfileResolver(profile)
 
     cover_layout = _layout_for_role(prs, resolver, "cover.title")
-    content_layout = _layout_for_role(prs, resolver, "heading.1") or _layout_for_role(prs, resolver, "paragraph")
+    content_layout = _layout_for_role(prs, resolver, "heading.1") or _layout_for_role(
+        prs, resolver, "paragraph"
+    )
 
     shell_components = structure.inventory_components(prs)
 
@@ -134,7 +137,9 @@ def generate(
     # Component-survival check (plan CC-3(b)): a native table/chart/picture present
     # in the shell that has no counterpart in the output is WARNed, so a deck that
     # loses a native object is visible in QA rather than silently down-rendered.
-    sink.extend(_check_component_survival(shell_components, structure.inventory_components(prs)))
+    sink.extend(
+        _check_component_survival(shell_components, structure.inventory_components(prs))
+    )
 
     # Pin the package modified time so two identical generations are byte-identical
     # (python-pptx stamps ``dcterms:modified`` at save otherwise).
@@ -173,7 +178,9 @@ def _check_component_survival(before: dict, after: dict) -> list[Finding]:
 # ---------------------------------------------------------------------------
 # Deterministic path (comprehension ABSENT) - today's behavior, byte-identical
 # ---------------------------------------------------------------------------
-def _generate_deterministic(prs, profile: dict, idoc, cover_layout, content_layout, sink: list) -> None:
+def _generate_deterministic(
+    prs, profile: dict, idoc, cover_layout, content_layout, sink: list
+) -> None:
     """Blind rebuild: clear all slides, build cover + one content slide per heading.
 
     Unchanged from the pre-comprehension behavior so the model-free CI path stays
@@ -184,7 +191,9 @@ def _generate_deterministic(prs, profile: dict, idoc, cover_layout, content_layo
     # Cover slide: only emitted when the IR actually carries a cover title and the
     # shell offers a layout with a title placeholder.
     if idoc.cover and idoc.cover.title:
-        cover_slide = prs.slides.add_slide(cover_layout or content_layout or prs.slide_layouts[0])
+        cover_slide = prs.slides.add_slide(
+            cover_layout or content_layout or prs.slide_layouts[0]
+        )
         title_ph = cover_slide.shapes.title
         if title_ph is not None:
             # Re-assert the cover title placeholder's brand run formatting after the
@@ -202,7 +211,9 @@ def _generate_deterministic(prs, profile: dict, idoc, cover_layout, content_layo
 # ---------------------------------------------------------------------------
 # Reconcile path (comprehension PRESENT) - keep structural, fill cover, regen agenda
 # ---------------------------------------------------------------------------
-def _generate_reconciled(prs, profile: dict, idoc, cover_layout, content_layout, sink: list) -> None:
+def _generate_reconciled(
+    prs, profile: dict, idoc, cover_layout, content_layout, sink: list
+) -> None:
     """Reconcile the preserved deck with the new content (plan §6).
 
     KEEP structural slides (everything the model did NOT tag ``verdict=demo``),
@@ -214,7 +225,9 @@ def _generate_reconciled(prs, profile: dict, idoc, cover_layout, content_layout,
     # 1) Cover fill IN PLACE on the existing cover slide, or a freshly-added cover
     # slide when the deck ships none. Multi-placeholder, by fill_rule. Returns the
     # set of cover anchor refs the reconciliation actually CLEARED.
-    cleared_anchors = _fill_cover_in_place(prs, profile, comp, idoc, cover_layout, content_layout, sink)
+    cleared_anchors = _fill_cover_in_place(
+        prs, profile, comp, idoc, cover_layout, content_layout, sink
+    )
 
     # 2) CLEAR demo slides only (the destructive floor: a slide is removed only when
     # the model tagged its region demo AND determinism corroborates it is demo - its
@@ -232,10 +245,14 @@ def _generate_reconciled(prs, profile: dict, idoc, cover_layout, content_layout,
     # 5) Destructive-action floor (plan §6): every cover anchor / region the
     # reconciliation removed must carry a corroborated destructive verdict, else
     # ERROR. Model-free; reads the frozen verdicts.
-    sink.extend(check_no_net_structure_loss(cleared_anchors | removed_region_refs, profile))
+    sink.extend(
+        check_no_net_structure_loss(cleared_anchors | removed_region_refs, profile)
+    )
 
 
-def _fill_cover_in_place(prs, profile: dict, comp: dict, idoc, cover_layout, content_layout, sink: list) -> set[str]:
+def _fill_cover_in_place(
+    prs, profile: dict, comp: dict, idoc, cover_layout, content_layout, sink: list
+) -> set[str]:
     """Fill the multi-placeholder cover IN PLACE by each slot's ``fill_rule``.
 
     Resolves each ``cover_slots`` anchor (``ph.<layout-idx>.<ph-idx>``) to a live
@@ -258,7 +275,9 @@ def _fill_cover_in_place(prs, profile: dict, comp: dict, idoc, cover_layout, con
         # surface to fill. Only worth doing when there is cover content to place.
         if not (cover.title or cover.subtitle or cover.fields):
             return set()
-        cover_slide = prs.slides.add_slide(cover_layout or content_layout or prs.slide_layouts[0])
+        cover_slide = prs.slides.add_slide(
+            cover_layout or content_layout or prs.slide_layouts[0]
+        )
 
     confidence = float(comp.get("confidence") or 0.0)
     cleared: set[str] = set()
@@ -437,7 +456,9 @@ def _existing_agenda_slide(prs):
 # ---------------------------------------------------------------------------
 # Shared content-slide builder (both paths append body content the same way)
 # ---------------------------------------------------------------------------
-def _append_content_slides(prs, profile: dict, idoc, content_layout, sink: list) -> None:
+def _append_content_slides(
+    prs, profile: dict, idoc, content_layout, sink: list
+) -> None:
     """Append one content slide per IR heading-section (capacity-split).
 
     Body lines are written as REAL body-placeholder paragraphs (one per line), each
@@ -515,7 +536,9 @@ def _add_native_table(slide, prs, table: ir.Table, body_placeholder=None) -> Non
     usable_height = max(300000, height - caption_height - gap)
     table_height = min(usable_height, max(360000, row_count * 360000))
 
-    gtable = slide.shapes.add_table(row_count, col_count, left, top, width, table_height)
+    gtable = slide.shapes.add_table(
+        row_count, col_count, left, top, width, table_height
+    )
     ppt_table = gtable.table
     row_offset = 0
     if has_header:
@@ -524,7 +547,9 @@ def _add_native_table(slide, prs, table: ir.Table, body_placeholder=None) -> Non
         row_offset = 1
     for r_idx, row in enumerate(table.rows):
         for c_idx in range(col_count):
-            ppt_table.cell(r_idx + row_offset, c_idx).text = _table_cell_text(row, c_idx)
+            ppt_table.cell(r_idx + row_offset, c_idx).text = _table_cell_text(
+                row, c_idx
+            )
 
     if caption:
         cap_top = top + table_height + gap
@@ -647,7 +672,9 @@ def _existing_cover_slide(prs, profile: dict):
 
 
 def _cover_layout_name(profile: dict) -> Optional[str]:
-    anchors = ((profile.get("surface") or {}).get("pptx") or {}).get("cover_anchors") or []
+    anchors = ((profile.get("surface") or {}).get("pptx") or {}).get(
+        "cover_anchors"
+    ) or []
     for a in anchors:
         if isinstance(a, dict) and a.get("layout"):
             return a["layout"]
@@ -702,9 +729,17 @@ def _cover_content_for(cover: ir.Cover, binds_to: Optional[str]) -> Optional[str
     if not binds_to:
         return None
     if binds_to == "title":
-        return textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", "")) or None
+        return (
+            textutil.runs_to_text(cover.title or [])
+            or str(cover.fields.get("title", ""))
+            or None
+        )
     if binds_to == "subtitle":
-        return textutil.runs_to_text(cover.subtitle or []) or str(cover.fields.get("subtitle", "")) or None
+        return (
+            textutil.runs_to_text(cover.subtitle or [])
+            or str(cover.fields.get("subtitle", ""))
+            or None
+        )
     val = cover.fields.get(binds_to)
     return str(val) if val not in (None, "") else None
 
@@ -770,7 +805,10 @@ def _sections(blocks: list) -> list[dict]:
     current: Optional[dict] = None
     for block in blocks:
         if isinstance(block, ir.Heading):
-            current = {"title": textutil.runs_to_text(block.runs) or "Content", "body": []}
+            current = {
+                "title": textutil.runs_to_text(block.runs) or "Content",
+                "body": [],
+            }
             sections.append(current)
         elif isinstance(block, ir.PageBreak):
             current = None
@@ -818,17 +856,30 @@ def _body_lines(blocks: list, sink: list) -> list[BodyLine]:
         elif isinstance(block, ir.Kpi):
             for kpi in block.items:
                 parts = [p for p in (kpi.label, kpi.value, kpi.delta) if p]
-                _append(lines, ": ".join(parts) if len(parts) > 1 else (parts[0] if parts else ""))
+                _append(
+                    lines,
+                    ": ".join(parts) if len(parts) > 1 else (parts[0] if parts else ""),
+                )
             _degrade(sink, "kpi")
         elif isinstance(block, ir.Chart):
             _append(lines, block.title or "")
             _degrade(sink, "chart")
         elif isinstance(block, ir.SmartArt):
             for node in block.nodes:
-                _append(lines, str(node.get("text") or "") if isinstance(node, dict) else str(node))
+                _append(
+                    lines,
+                    str(node.get("text") or "")
+                    if isinstance(node, dict)
+                    else str(node),
+                )
             _degrade(sink, "smartart")
         elif isinstance(block, ir.Image):
-            _append(lines, textutil.runs_to_text(block.caption) if block.caption else (block.alt or ""))
+            _append(
+                lines,
+                textutil.runs_to_text(block.caption)
+                if block.caption
+                else (block.alt or ""),
+            )
             _degrade(sink, "image")
         # Divider / Component / Section / Toc carry no body text here.
     return lines

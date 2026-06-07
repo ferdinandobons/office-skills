@@ -26,6 +26,7 @@ Brand-agnostic TOC detection: rather than hardcoding one template's ``TOCHeading
 contents word (EN/IT/FR/DE/ES) counts, so it works on any company template in any
 language.
 """
+
 from __future__ import annotations
 
 import copy
@@ -168,7 +169,11 @@ def _element_holds_strong_toc(el) -> bool:
                 return True
     for d in el.iter():
         dln = _local_name(d.tag)
-        if dln == "instrText" and d.text and d.text.strip().startswith(TOC_INSTR_PREFIX):
+        if (
+            dln == "instrText"
+            and d.text
+            and d.text.strip().startswith(TOC_INSTR_PREFIX)
+        ):
             return True
         if dln == "p" and _style_is_toc(_p_style_val(d)):
             return True
@@ -287,7 +292,10 @@ def classify_body_children(doc) -> list[dict]:
             if _is_lone_contents_heading(children[j]):
                 heading_at = j
                 break
-            if _p_text(children[j]).strip() == "" and _local_name(children[j].tag) == "p":
+            if (
+                _p_text(children[j]).strip() == ""
+                and _local_name(children[j].tag) == "p"
+            ):
                 j -= 1
                 continue
             break
@@ -323,7 +331,11 @@ def classify_body_children(doc) -> list[dict]:
 
     # First Heading-1 anywhere (the no-TOC cover/body boundary).
     first_h1 = next(
-        (i for i, el in enumerate(children) if not _is_sectpr(el) and _child_starts_body(el)),
+        (
+            i
+            for i, el in enumerate(children)
+            if not _is_sectpr(el) and _child_starts_body(el)
+        ),
         None,
     )
 
@@ -345,7 +357,13 @@ def classify_body_children(doc) -> list[dict]:
     for i, el in enumerate(children):
         if _is_sectpr(el):
             out.append(
-                {"index": i, "tag": _local_name(el.tag), "region": None, "is_sectpr": True, "holds_sectpr": False}
+                {
+                    "index": i,
+                    "tag": _local_name(el.tag),
+                    "region": None,
+                    "is_sectpr": True,
+                    "holds_sectpr": False,
+                }
             )
             continue
         if i in toc_indices:
@@ -498,7 +516,9 @@ def _toc_field_begins(children: list) -> list[dict]:
                 if stack:
                     stack[-1]["instr"] += el.text or ""
     # Order by the begin child index so the surfaced ids are stable.
-    out.sort(key=lambda f: (f["begin_index"] if f["begin_index"] is not None else 1 << 30))
+    out.sort(
+        key=lambda f: f["begin_index"] if f["begin_index"] is not None else 1 << 30
+    )
     return out
 
 
@@ -607,7 +627,10 @@ def _index_field_remove_indices(doc, field_id: str) -> set[int]:
     if heading_at is not None:
         to_remove.add(heading_at)
         for k in range(heading_at + 1, min(span)):
-            if _local_name(children[k].tag) == "p" and _p_text(children[k]).strip() == "":
+            if (
+                _local_name(children[k].tag) == "p"
+                and _p_text(children[k]).strip() == ""
+            ):
                 to_remove.add(k)
     return {i for i in to_remove if i < len(children) and not _is_sectpr(children[i])}
 
@@ -864,7 +887,13 @@ def clear_body(doc) -> None:
     clear_body_region(doc, preserve_cover=False, preserve_toc=False)
 
 
-def clear_body_region(doc, structure: Optional[dict] = None, *, preserve_cover: bool = True, preserve_toc: bool = True) -> None:
+def clear_body_region(
+    doc,
+    structure: Optional[dict] = None,
+    *,
+    preserve_cover: bool = True,
+    preserve_toc: bool = True,
+) -> None:
     """Remove ONLY the body region, preserving the cover and TOC regions.
 
     Keeps the cover block(s) and the TOC sdt/region and the final ``sectPr``;
@@ -1111,17 +1140,24 @@ def _outline_toc_instruction(el) -> Optional[str]:
     return None
 
 
-def _rewrite_sdt_outline_toc_cache(sdt, instr: str, headings: list[tuple[int, str]]) -> bool:
+def _rewrite_sdt_outline_toc_cache(
+    sdt, instr: str, headings: list[tuple[int, str]]
+) -> bool:
     content = sdt.find(w("sdtContent"))
     if content is None:
         return False
     paras = [el for el in list(content) if _local_name(el.tag) == "p"]
-    field_idx = next((i for i, p in enumerate(paras) if _outline_toc_instruction(p) is not None), None)
+    field_idx = next(
+        (i for i, p in enumerate(paras) if _outline_toc_instruction(p) is not None),
+        None,
+    )
     if field_idx is None:
         return False
 
     old_field_para = paras[field_idx]
-    entry_template = paras[field_idx + 1] if field_idx + 1 < len(paras) else old_field_para
+    entry_template = (
+        paras[field_idx + 1] if field_idx + 1 < len(paras) else old_field_para
+    )
     for p in paras[field_idx:]:
         if p.getparent() is content:
             content.remove(p)
@@ -1133,12 +1169,16 @@ def _rewrite_sdt_outline_toc_cache(sdt, instr: str, headings: list[tuple[int, st
     return True
 
 
-def _rewrite_paragraph_outline_toc_cache(p, instr: str, headings: list[tuple[int, str]]) -> None:
+def _rewrite_paragraph_outline_toc_cache(
+    p, instr: str, headings: list[tuple[int, str]]
+) -> None:
     _clear_paragraph_content(p)
     p.append(_field_run("begin", dirty=True))
     p.append(_instr_run(instr))
     p.append(_field_run("separate"))
-    p.append(_text_run(" | ".join(_toc_entry_text(level, text) for level, text in headings)))
+    p.append(
+        _text_run(" | ".join(_toc_entry_text(level, text) for level, text in headings))
+    )
     p.append(_field_run("end"))
 
 

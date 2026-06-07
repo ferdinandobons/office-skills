@@ -49,6 +49,7 @@ deterministically, so re-running the builder yields a byte-identical file
 Run:
     PYTHONPATH=scripts .venv/bin/python tests/fixtures/builders/build_complex_pptx.py
 """
+
 from __future__ import annotations
 
 import struct
@@ -79,11 +80,11 @@ ACME_SLATE = RGBColor(0x55, 0x66, 0x77)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
 # Default-template layout indices (verified against python-pptx 1.x default).
-LO_TITLE = 0          # Title Slide      : CENTER_TITLE + SUBTITLE + date/footer/num
+LO_TITLE = 0  # Title Slide      : CENTER_TITLE + SUBTITLE + date/footer/num
 LO_TITLE_CONTENT = 1  # Title and Content: TITLE + OBJECT body
-LO_SECTION = 2        # Section Header   : TITLE + BODY
-LO_TITLE_ONLY = 5     # Title Only       : TITLE only
-LO_PIC_CAPTION = 8    # Picture w/Caption: TITLE + PICTURE + BODY
+LO_SECTION = 2  # Section Header   : TITLE + BODY
+LO_TITLE_ONLY = 5  # Title Only       : TITLE only
+LO_PIC_CAPTION = 8  # Picture w/Caption: TITLE + PICTURE + BODY
 
 # The exact default-template prompt string that the BODY/TITLE placeholders
 # carry. A demo slide's only text must EQUAL one of these for the extractor's
@@ -180,16 +181,31 @@ def _add_cover(prs, png_path: Path):
     layout = prs.slide_layouts[LO_TITLE]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Acme Corp Quarterly Business Review", size=40, bold=True, color=ACME_NAVY)
-    _set_text(ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=ACME_TEAL)
+    _set_text(
+        ph[0],
+        "Acme Corp Quarterly Business Review",
+        size=40,
+        bold=True,
+        color=ACME_NAVY,
+    )
+    _set_text(
+        ph[1], "FY2026 - Performance, Outlook & Initiatives", size=20, color=ACME_TEAL
+    )
     if 10 in ph:  # DATE placeholder
         _set_text(ph[10], "January 15, 2026", size=12, color=ACME_SLATE)
     if 11 in ph:  # FOOTER placeholder
-        _set_text(ph[11], "Acme Corp - Confidential (synthetic sample)", size=12, color=ACME_SLATE)
+        _set_text(
+            ph[11],
+            "Acme Corp - Confidential (synthetic sample)",
+            size=12,
+            color=ACME_SLATE,
+        )
     if 12 in ph:  # SLIDE_NUMBER placeholder
         _set_text(ph[12], "1", size=12, color=ACME_SLATE)
     # Logo-like picture in the corner (the synthetic Acme mark).
-    slide.shapes.add_picture(str(png_path), Emu(457200), Emu(457200), height=Emu(457200))
+    slide.shapes.add_picture(
+        str(png_path), Emu(457200), Emu(457200), height=Emu(457200)
+    )
     return slide
 
 
@@ -204,7 +220,11 @@ def _add_agenda(prs, section_names):
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
     _set_text(ph[0], "Agenda", size=36, bold=True, color=ACME_NAVY)
-    _bullets(ph[1], [(f"{i+1}. {name}", 0) for i, name in enumerate(section_names)], size=20)
+    _bullets(
+        ph[1],
+        [(f"{i + 1}. {name}", 0) for i, name in enumerate(section_names)],
+        size=20,
+    )
     return slide
 
 
@@ -237,7 +257,9 @@ def _add_content_table(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=ACME_NAVY)
+    _set_text(
+        ph[0], "Regional Revenue (USD thousands)", size=28, bold=True, color=ACME_NAVY
+    )
 
     rows, cols = 5, 5
     left, top, width, height = Emu(457200), Emu(1828800), Emu(8229600), Emu(3200400)
@@ -286,7 +308,9 @@ def _add_chart(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=ACME_NAVY)
+    _set_text(
+        ph[0], "Quarterly Net Revenue by Region", size=28, bold=True, color=ACME_NAVY
+    )
 
     chart_data = CategoryChartData()
     chart_data.categories = ["Q1", "Q2", "Q3", "Q4"]
@@ -318,19 +342,27 @@ def _add_picture_slide(prs, png_path: Path):
         try:
             ph[1].insert_picture(str(png_path))
         except Exception:
-            slide.shapes.add_picture(str(png_path), Emu(457200), Emu(1828800), height=Emu(914400))
+            slide.shapes.add_picture(
+                str(png_path), Emu(457200), Emu(1828800), height=Emu(914400)
+            )
     else:
-        slide.shapes.add_picture(str(png_path), Emu(457200), Emu(1828800), height=Emu(914400))
+        slide.shapes.add_picture(
+            str(png_path), Emu(457200), Emu(1828800), height=Emu(914400)
+        )
     # ...and write a caption in the BODY placeholder (idx 2).
     if 2 in ph:
         _bullets(
             ph[2],
-            [("A synthetic, generated mark - no proprietary asset.", 0),
-             ("Navy field, amber stripe, teal corner.", 0)],
+            [
+                ("A synthetic, generated mark - no proprietary asset.", 0),
+                ("Navy field, amber stripe, teal corner.", 0),
+            ],
             size=16,
         )
     # A second, free-floating copy via add_picture to exercise that path too.
-    slide.shapes.add_picture(str(png_path), Emu(5486400), Emu(1828800), height=Emu(914400))
+    slide.shapes.add_picture(
+        str(png_path), Emu(5486400), Emu(1828800), height=Emu(914400)
+    )
     return slide
 
 
@@ -344,7 +376,13 @@ def _add_smartart_approx(prs):
     layout = prs.slide_layouts[LO_TITLE_ONLY]
     slide = prs.slides.add_slide(layout)
     ph = {p.placeholder_format.idx: p for p in slide.placeholders}
-    _set_text(ph[0], "Our Approach (SmartArt-style process)", size=28, bold=True, color=ACME_NAVY)
+    _set_text(
+        ph[0],
+        "Our Approach (SmartArt-style process)",
+        size=28,
+        bold=True,
+        color=ACME_NAVY,
+    )
 
     steps = [("Discover", ACME_NAVY), ("Build", ACME_TEAL), ("Scale", ACME_AMBER)]
     box_w, box_h = Emu(2286000), Emu(1143000)
@@ -392,7 +430,11 @@ def _add_demo_slide(prs):
     title = slide.placeholders[0]
     # Re-read the live prompt so this stays correct if the template changes.
     layout_title = layout.placeholders[0]
-    prompt = (layout_title.text or "").strip() if getattr(layout_title, "has_text_frame", False) else ""
+    prompt = (
+        (layout_title.text or "").strip()
+        if getattr(layout_title, "has_text_frame", False)
+        else ""
+    )
     title.text_frame.text = prompt or TITLE_PROMPT
     return slide
 
@@ -405,8 +447,10 @@ def _add_closing(prs):
     _set_text(ph[0], "Thank You", size=40, bold=True, color=ACME_NAVY)
     _bullets(
         ph[1],
-        [("Questions? hello@acme.example", 0),
-         ("Acme Corp - synthetic sample deck.", 0)],
+        [
+            ("Questions? hello@acme.example", 0),
+            ("Acme Corp - synthetic sample deck.", 0),
+        ],
         size=18,
     )
     return slide
@@ -426,7 +470,6 @@ def _inject_sections(prs, sections) -> None:
     """
     pres = prs.part._element  # <p:presentation>
     p_ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
-    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     # Map slide index -> the sldId 'id' attribute (PowerPoint section sldId uses it).
     sld_id_lst = pres.find(f"{{{p_ns}}}sldIdLst")
@@ -484,15 +527,15 @@ def build(out: Path = OUT) -> Path:
     section_names = ["Overview", "Financials", "Closing"]
 
     # --- Build slides in deck order; collect their 0-based indices. -----------
-    s0 = _add_cover(prs, tmp_png)                 # 0 cover
-    s1 = _add_agenda(prs, section_names)          # 1 agenda / section list
-    s2 = _add_content_text(prs)                   # 2 content-text
-    s3 = _add_content_table(prs)                  # 3 content-table (native table)
-    s4 = _add_chart(prs)                          # 4 native chart
-    s5 = _add_picture_slide(prs, tmp_png)         # 5 picture
-    s6 = _add_smartart_approx(prs)                # 6 grouped-shape "SmartArt"
-    s7 = _add_demo_slide(prs)                     # 7 DEMO (prompt-only text)
-    s8 = _add_closing(prs)                        # 8 closing
+    s0 = _add_cover(prs, tmp_png)  # 0 cover
+    _add_agenda(prs, section_names)  # 1 agenda / section list
+    s2 = _add_content_text(prs)  # 2 content-text
+    s3 = _add_content_table(prs)  # 3 content-table (native table)
+    s4 = _add_chart(prs)  # 4 native chart
+    s5 = _add_picture_slide(prs, tmp_png)  # 5 picture
+    s6 = _add_smartart_approx(prs)  # 6 grouped-shape "SmartArt"
+    s7 = _add_demo_slide(prs)  # 7 DEMO (prompt-only text)
+    s8 = _add_closing(prs)  # 8 closing
     _ = (s0, s2, s3, s4, s5, s6, s7, s8)
 
     # --- Inject the real PowerPoint section list (lxml). ----------------------

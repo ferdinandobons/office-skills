@@ -20,6 +20,7 @@ The fixture is 100% synthetic ("Acme"); no proprietary template is copied in.
 The range / style names used as ids are the synthetic author's OWN vocabulary
 carried as data - never matched as code-side literals.
 """
+
 from __future__ import annotations
 
 import os
@@ -40,7 +41,13 @@ from brandkit.profile import schema
 from brandkit.profile import store
 from brandkit.qa import checks_deterministic as checks
 
-FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "complex" / "acme_complex.xlsx"
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "tests"
+    / "fixtures"
+    / "complex"
+    / "acme_complex.xlsx"
+)
 
 
 def _formula_map(path: Path) -> dict[str, str]:
@@ -111,9 +118,7 @@ class XlsxFormulaPreservation(_ComplexBase):
             td = Path(t)
             loaded = self._extract(td)
             prof = loaded.profile
-            grid = GridDocument(
-                regions={"model_body": [["X", 1, 2, 3, 4, "", ""]]}
-            )
+            grid = GridDocument(regions={"model_body": [["X", 1, 2, 3, 4, "", ""]]})
             out = td / "out.xlsx"
             xlsx_generate.generate(prof, loaded.shell_path, grid, out)
             findings = checks.check_formula_preservation(loaded.shell_path, out, prof)

@@ -26,6 +26,7 @@ the extractor produced)::
     ├─ sections/...          (optional)
     └─ provenance.sha256     (the shell hash, also mirrored in profile.json)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -68,8 +69,8 @@ class ProfileLocation:
     """Where a profile directory resolved to."""
 
     name: str
-    scope: str          # "project" | "global"
-    directory: Path     # the brand-kit/<name> dir
+    scope: str  # "project" | "global"
+    directory: Path  # the brand-kit/<name> dir
     profile_json: Path  # the profile.json inside it
 
 
@@ -165,9 +166,7 @@ def _assert_within(target: Path, root: Path, name: str) -> Path:
     try:
         target.resolve().relative_to(root.resolve())
     except ValueError:
-        raise ProfileStoreError(
-            f"profile name escapes the store root: {name!r}"
-        )
+        raise ProfileStoreError(f"profile name escapes the store root: {name!r}")
     return target
 
 
@@ -428,9 +427,7 @@ def load_profile(
     ext = schema.KIND_EXTENSION.get(kind, kind or "")
     shell_path = loc.directory / "template" / f"shell.{ext}"
 
-    recorded = (
-        (profile.get("provenance") or {}).get("shell") or {}
-    ).get("sha256")
+    recorded = ((profile.get("provenance") or {}).get("shell") or {}).get("sha256")
     actual = sha256_file(shell_path) if shell_path.is_file() else None
     drift = bool(recorded and actual and recorded != actual)
 
@@ -447,7 +444,9 @@ def load_profile(
     )
 
 
-def profile_exists(name: str, scope: str = "auto", *, cwd: Optional[PathLike] = None) -> bool:
+def profile_exists(
+    name: str, scope: str = "auto", *, cwd: Optional[PathLike] = None
+) -> bool:
     """Return True if a profile ``name`` is resolvable in ``scope``."""
     try:
         resolve_profile_dir(name, scope, cwd=cwd)
@@ -464,7 +463,7 @@ class ProfileSummary:
     """A lightweight listing entry (no shell hashing)."""
 
     name: str
-    scope: str          # "project" | "global"
+    scope: str  # "project" | "global"
     directory: Path
     kind: Optional[str]
     display_name: Optional[str]
@@ -486,7 +485,10 @@ def list_profiles(*, cwd: Optional[PathLike] = None) -> list[ProfileSummary]:
     out: list[ProfileSummary] = []
     project_names: set[str] = set()
 
-    for scope, root in (("project", project_store_root(cwd)), ("global", global_store_root())):
+    for scope, root in (
+        ("project", project_store_root(cwd)),
+        ("global", global_store_root()),
+    ):
         if not root.is_dir():
             continue
         for child in sorted(root.iterdir(), key=lambda p: p.name):
@@ -514,8 +516,12 @@ def _summarize(name: str, scope: str, directory: Path, pj: Path) -> ProfileSumma
     except (OSError, json.JSONDecodeError):
         pass
     return ProfileSummary(
-        name=name, scope=scope, directory=directory, kind=kind,
-        display_name=display, verification_status=ver,
+        name=name,
+        scope=scope,
+        directory=directory,
+        kind=kind,
+        display_name=display,
+        verification_status=ver,
     )
 
 

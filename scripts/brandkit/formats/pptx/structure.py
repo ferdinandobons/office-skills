@@ -33,6 +33,7 @@ Detection is grounded in evidence, never in brand-specific names:
 The ids are stable and recomputable from the live deck at generate time, so the
 model binds a ref once and the generator resolves the same element later.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -65,18 +66,22 @@ def _local_name(tag) -> str:
 # signal the model reasons over - the same role a placeholder plays whatever the
 # template's prompt text reads.
 # ---------------------------------------------------------------------------
-TITLE_TYPES = frozenset({
-    PP_PLACEHOLDER.TITLE,
-    PP_PLACEHOLDER.CENTER_TITLE,
-    PP_PLACEHOLDER.VERTICAL_TITLE,
-})
+TITLE_TYPES = frozenset(
+    {
+        PP_PLACEHOLDER.TITLE,
+        PP_PLACEHOLDER.CENTER_TITLE,
+        PP_PLACEHOLDER.VERTICAL_TITLE,
+    }
+)
 SUBTITLE_TYPES = frozenset({PP_PLACEHOLDER.SUBTITLE})
-BODY_TYPES = frozenset({
-    PP_PLACEHOLDER.BODY,
-    PP_PLACEHOLDER.OBJECT,
-    PP_PLACEHOLDER.VERTICAL_BODY,
-    PP_PLACEHOLDER.VERTICAL_OBJECT,
-})
+BODY_TYPES = frozenset(
+    {
+        PP_PLACEHOLDER.BODY,
+        PP_PLACEHOLDER.OBJECT,
+        PP_PLACEHOLDER.VERTICAL_BODY,
+        PP_PLACEHOLDER.VERTICAL_OBJECT,
+    }
+)
 
 
 def _ph_family(ptype) -> str:
@@ -127,16 +132,29 @@ def classify_layouts(prs) -> list[dict]:
                 subtitle_idx = fmt.idx
             elif ptype in BODY_TYPES and body_idx is None:
                 body_idx = fmt.idx
-            prompt = ph.text[:200] if getattr(ph, "has_text_frame", False) and ph.text else ""
-            phs.append({"idx": fmt.idx, "ptype": str(ptype), "family": family, "prompt": prompt})
-        described.append({
-            "name": layout.name,
-            "idx": pos,
-            "title_idx": title_idx,
-            "subtitle_idx": subtitle_idx,
-            "body_idx": body_idx,
-            "placeholders": phs,
-        })
+            prompt = (
+                ph.text[:200]
+                if getattr(ph, "has_text_frame", False) and ph.text
+                else ""
+            )
+            phs.append(
+                {
+                    "idx": fmt.idx,
+                    "ptype": str(ptype),
+                    "family": family,
+                    "prompt": prompt,
+                }
+            )
+        described.append(
+            {
+                "name": layout.name,
+                "idx": pos,
+                "title_idx": title_idx,
+                "subtitle_idx": subtitle_idx,
+                "body_idx": body_idx,
+                "placeholders": phs,
+            }
+        )
     return described
 
 
@@ -155,14 +173,18 @@ def pick_cover(described: list[dict]) -> Optional[dict]:
     return None
 
 
-def pick_content(described: list[dict], *, exclude_idx: Optional[int] = None) -> Optional[dict]:
+def pick_content(
+    described: list[dict], *, exclude_idx: Optional[int] = None
+) -> Optional[dict]:
     """Pick the layout that best reads as a title+body content slide.
 
     Prefers a layout with BOTH a title and a body slot, skipping ``exclude_idx``
     (the cover) when an alternative exists. Falls back to any title-bearing layout,
     then any body-bearing layout.
     """
-    title_body = [d for d in described if d["title_idx"] is not None and d["body_idx"] is not None]
+    title_body = [
+        d for d in described if d["title_idx"] is not None and d["body_idx"] is not None
+    ]
     for d in title_body:
         if d["idx"] != exclude_idx:
             return d
@@ -204,16 +226,18 @@ def inventory_cover_anchors(prs) -> list[dict]:
         return []
     anchors: list[dict] = []
     for ph in cover["placeholders"]:
-        anchors.append({
-            "id": f"ph.{cover['idx']}.{ph['idx']}",
-            "container": "placeholder",
-            "layout": cover["name"],
-            "layout_idx": cover["idx"],
-            "ph_idx": ph["idx"],
-            "ph_type": ph["ptype"],
-            "family": ph["family"],
-            "placeholder": ph["prompt"],
-        })
+        anchors.append(
+            {
+                "id": f"ph.{cover['idx']}.{ph['idx']}",
+                "container": "placeholder",
+                "layout": cover["name"],
+                "layout_idx": cover["idx"],
+                "ph_idx": ph["idx"],
+                "ph_type": ph["ptype"],
+                "family": ph["family"],
+                "placeholder": ph["prompt"],
+            }
+        )
     return anchors
 
 
@@ -276,12 +300,14 @@ def inventory_fields(prs) -> list[dict]:
     sections = detect_sections(prs)
     if not sections:
         return []
-    return [{
-        "id": "field.sections",
-        "seq_id": None,
-        "kind": "section_list",
-        "section_count": len(sections),
-    }]
+    return [
+        {
+            "id": "field.sections",
+            "seq_id": None,
+            "kind": "section_list",
+            "section_count": len(sections),
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -372,12 +398,14 @@ def classify_slides(prs) -> list[dict]:
             region = "demo"
         else:
             region = "structural"
-        out.append({
-            "index": i,
-            "slide_id": sld_ids[i] if i < len(sld_ids) else None,
-            "layout": layout_name,
-            "region": region,
-        })
+        out.append(
+            {
+                "index": i,
+                "slide_id": sld_ids[i] if i < len(sld_ids) else None,
+                "layout": layout_name,
+                "region": region,
+            }
+        )
     return out
 
 
@@ -431,35 +459,41 @@ def detect_skeleton(prs) -> dict:
     skeleton: list[dict] = []
     order = 0
     if has_cover:
-        skeleton.append({
-            "region": "cover",
-            "order": order,
-            "role": "section.cover",
-            "required": True,
-            "repeatable": False,
-            "evidence": "a slide layout exposes a title placeholder (the cover layout)",
-        })
+        skeleton.append(
+            {
+                "region": "cover",
+                "order": order,
+                "role": "section.cover",
+                "required": True,
+                "repeatable": False,
+                "evidence": "a slide layout exposes a title placeholder (the cover layout)",
+            }
+        )
         order += 1
     if has_sections:
-        skeleton.append({
-            "region": "sections",
-            "order": order,
-            "role": "section.agenda",
-            "required": False,
-            "repeatable": False,
-            "evidence": "the presentation carries a p14:sectionLst (the agenda/section list)",
-        })
+        skeleton.append(
+            {
+                "region": "sections",
+                "order": order,
+                "role": "section.agenda",
+                "required": False,
+                "repeatable": False,
+                "evidence": "the presentation carries a p14:sectionLst (the agenda/section list)",
+            }
+        )
         order += 1
     if has_body or not skeleton:
-        skeleton.append({
-            "region": "body",
-            "order": order,
-            "role": "section.body",
-            "required": True,
-            "repeatable": True,
-            "freeform": True,
-            "evidence": "the content slides after the cover (one section per heading)",
-        })
+        skeleton.append(
+            {
+                "region": "body",
+                "order": order,
+                "role": "section.body",
+                "required": True,
+                "repeatable": True,
+                "freeform": True,
+                "evidence": "the content slides after the cover (one section per heading)",
+            }
+        )
 
     return {"ordered": True, "skeleton": skeleton}
 
@@ -516,11 +550,13 @@ def slide_component_inventory(prs) -> list[dict]:
     """
     out: list[dict] = []
     for i, slide in enumerate(prs.slides):
-        out.append({
-            "index": i,
-            "layout": slide.slide_layout.name,
-            "components": _slide_component_counts(slide),
-        })
+        out.append(
+            {
+                "index": i,
+                "layout": slide.slide_layout.name,
+                "components": _slide_component_counts(slide),
+            }
+        )
     return out
 
 

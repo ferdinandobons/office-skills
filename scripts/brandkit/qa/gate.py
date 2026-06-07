@@ -20,6 +20,7 @@ fails when full visual proof is unavailable or L1/OCR findings are present. The
 PNGs and manifest are SIDE artifacts in an out dir next to the output; the
 generated document's bytes never change.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -90,7 +91,11 @@ def run_qa(
     findings = findings + checks_deterministic.check_shell_provenance(shell, profile)
 
     findings = findings + _run_visual_audit(
-        target, profile, qa=qa, out_dir=out_dir, visual=visual,
+        target,
+        profile,
+        qa=qa,
+        out_dir=out_dir,
+        visual=visual,
     )
 
     verdict = schema.VerificationStatus.PASSED.value
@@ -144,11 +149,13 @@ def _run_visual_audit(
     resolved_out = Path(out_dir) if out_dir is not None else vqa.default_out_dir(target)
 
     if not renderers_ok:
-        findings = [Finding(
-            "visual.unavailable",
-            schema.Severity.INFO.value,
-            "visual QA unavailable (soffice/pdftoppm absent); L0 only",
-        )]
+        findings = [
+            Finding(
+                "visual.unavailable",
+                schema.Severity.INFO.value,
+                "visual QA unavailable (soffice/pdftoppm absent); L0 only",
+            )
+        ]
         if qa in ("deep", "strict"):
             render_errors: list[str] = []
             render_warnings: list[str] = []
@@ -163,25 +170,35 @@ def _run_visual_audit(
                 )
                 findings.extend(vqa.run_visual_l1(png_paths))
                 for warning in render_warnings:
-                    findings.append(Finding(
-                        "visual.render_degraded",
-                        schema.Severity.WARNING.value,
-                        warning,
-                    ))
+                    findings.append(
+                        Finding(
+                            "visual.render_degraded",
+                            schema.Severity.WARNING.value,
+                            warning,
+                        )
+                    )
                 if not png_paths:
-                    detail = render_errors[-1] if render_errors else "renderer produced no pages"
-                    findings.append(Finding(
-                        "visual.render_failed",
-                        schema.Severity.WARNING.value,
-                        f"visual fallback render failed: {detail}",
-                    ))
+                    detail = (
+                        render_errors[-1]
+                        if render_errors
+                        else "renderer produced no pages"
+                    )
+                    findings.append(
+                        Finding(
+                            "visual.render_failed",
+                            schema.Severity.WARNING.value,
+                            f"visual fallback render failed: {detail}",
+                        )
+                    )
                     findings.extend(vqa.check_page_count_sane(png_paths))
             else:
-                findings.append(Finding(
-                    "visual.strict_unavailable",
-                    schema.Severity.ERROR.value,
-                    "strict visual QA requires full render proof, but renderers are unavailable",
-                ))
+                findings.append(
+                    Finding(
+                        "visual.strict_unavailable",
+                        schema.Severity.ERROR.value,
+                        "strict visual QA requires full render proof, but renderers are unavailable",
+                    )
+                )
             ocr_report = vqa.run_visual_ocr(png_paths, profile)
             findings.extend(vqa.ocr_findings(ocr_report))
             manifest = vqa.build_visual_manifest(
@@ -196,12 +213,14 @@ def _run_visual_audit(
                 ocr_report=ocr_report,
                 qa_mode=qa,
             )
-            findings.append(Finding(
-                "visual.manifest",
-                schema.Severity.INFO.value,
-                f"degraded visual audit manifest written: {manifest}",
-                location=str(manifest),
-            ))
+            findings.append(
+                Finding(
+                    "visual.manifest",
+                    schema.Severity.INFO.value,
+                    f"degraded visual audit manifest written: {manifest}",
+                    location=str(manifest),
+                )
+            )
         return findings
 
     render_errors: list[str] = []
@@ -218,23 +237,29 @@ def _run_visual_audit(
     findings: list[Finding] = list(vqa.run_visual_l1(png_paths))
     if visual is None and render_warnings:
         for warning in render_warnings:
-            findings.append(Finding(
-                "visual.render_degraded",
-                schema.Severity.WARNING.value,
-                warning,
-            ))
+            findings.append(
+                Finding(
+                    "visual.render_degraded",
+                    schema.Severity.WARNING.value,
+                    warning,
+                )
+            )
     if visual is None and not png_paths:
         detail = render_errors[-1] if render_errors else "renderer produced no pages"
-        findings.append(Finding(
-            "visual.render_failed",
-            schema.Severity.WARNING.value,
-            f"visual render failed after renderer probe: {detail}",
-        ))
+        findings.append(
+            Finding(
+                "visual.render_failed",
+                schema.Severity.WARNING.value,
+                f"visual render failed after renderer probe: {detail}",
+            )
+        )
     findings.extend(vqa.check_page_count_sane(png_paths))
 
     if qa in ("deep", "strict"):
-        manifest_renderers_ok = renderers_ok if visual is not None else (
-            bool(png_paths) and not _degraded_render_warnings(render_warnings)
+        manifest_renderers_ok = (
+            renderers_ok
+            if visual is not None
+            else (bool(png_paths) and not _degraded_render_warnings(render_warnings))
         )
         ocr_report = vqa.run_visual_ocr(png_paths, profile)
         findings.extend(vqa.ocr_findings(ocr_report))
@@ -252,12 +277,14 @@ def _run_visual_audit(
             ocr_report=ocr_report,
             qa_mode=qa,
         )
-        findings.append(Finding(
-            "visual.manifest",
-            schema.Severity.INFO.value,
-            f"visual audit manifest written: {manifest}",
-            location=str(manifest),
-        ))
+        findings.append(
+            Finding(
+                "visual.manifest",
+                schema.Severity.INFO.value,
+                f"visual audit manifest written: {manifest}",
+                location=str(manifest),
+            )
+        )
     return findings
 
 
@@ -283,10 +310,12 @@ def _strict_visual_errors(findings: list[Finding]) -> list[Finding]:
     for finding in findings:
         if finding.check not in _STRICT_BLOCKING_CHECKS:
             continue
-        errors.append(Finding(
-            "visual.strict",
-            schema.Severity.ERROR.value,
-            f"strict visual QA blocks on {finding.check}: {finding.message}",
-            location=finding.location,
-        ))
+        errors.append(
+            Finding(
+                "visual.strict",
+                schema.Severity.ERROR.value,
+                f"strict visual QA blocks on {finding.check}: {finding.message}",
+                location=finding.location,
+            )
+        )
     return errors

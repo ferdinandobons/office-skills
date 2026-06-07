@@ -13,6 +13,7 @@ fragile:
   (e.g. the chart's embedded workbook inside a .pptx). Without it, wall-clock
   leaks make the documented ``Regenerate`` step leave a dirty git tree.
 """
+
 from __future__ import annotations
 
 import io
@@ -21,8 +22,8 @@ import struct
 import zipfile
 import zlib
 
-_FIXED_DT = (1980, 1, 1, 0, 0, 0)        # constant DOS time for every zip member
-_FIXED_ISO = "2026-06-05T00:00:00Z"      # constant W3CDTF for core.xml timestamps
+_FIXED_DT = (1980, 1, 1, 0, 0, 0)  # constant DOS time for every zip member
+_FIXED_ISO = "2026-06-05T00:00:00Z"  # constant W3CDTF for core.xml timestamps
 _TS_RE = re.compile(
     rb"(<dcterms:(?:created|modified)[^>]*>)[^<]*(</dcterms:(?:created|modified)>)"
 )
@@ -41,16 +42,22 @@ def rgba(hexstr: str, alpha: int = 255) -> tuple:
 
 def _freeze_bytes(data: bytes) -> bytes:
     out = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(data)) as zin, \
-            zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+    with (
+        zipfile.ZipFile(io.BytesIO(data)) as zin,
+        zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout,
+    ):
         for info in zin.infolist():
             payload = zin.read(info.filename)
             if payload[:2] == b"PK" and info.filename.lower().endswith(
                 (".xlsx", ".docx", ".pptx")
             ):
-                payload = _freeze_bytes(payload)  # nested OOXML (pptx embedded workbook)
+                payload = _freeze_bytes(
+                    payload
+                )  # nested OOXML (pptx embedded workbook)
             if info.filename.endswith("core.xml"):
-                payload = _TS_RE.sub(rb"\g<1>" + _FIXED_ISO.encode() + rb"\g<2>", payload)
+                payload = _TS_RE.sub(
+                    rb"\g<1>" + _FIXED_ISO.encode() + rb"\g<2>", payload
+                )
             zi = zipfile.ZipInfo(info.filename, date_time=_FIXED_DT)
             zi.compress_type = zipfile.ZIP_DEFLATED
             zi.external_attr = info.external_attr
@@ -92,11 +99,15 @@ def _png_bytes(rgba: bytes, w: int, h: int) -> bytes:
     stride = w * 4
     for y in range(h):
         raw.append(0)  # filter type 0 (None) per scanline
-        raw.extend(rgba[y * stride:(y + 1) * stride])
+        raw.extend(rgba[y * stride : (y + 1) * stride])
 
     def _chunk(tag: bytes, data: bytes) -> bytes:
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
 
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8-bit RGBA
@@ -135,10 +146,15 @@ def _in_round(x: int, y: int, x0: int, y0: int, x1: int, y1: int, r: int) -> boo
         return False
     if r <= 0:
         return True
-    for cx, cy in ((x0 + r, y0 + r), (x1 - 1 - r, y0 + r),
-                   (x0 + r, y1 - 1 - r), (x1 - 1 - r, y1 - 1 - r)):
-        in_corner = ((x < x0 + r and (cx == x0 + r)) or (x > x1 - 1 - r and cx == x1 - 1 - r)) and \
-                    ((y < y0 + r and cy == y0 + r) or (y > y1 - 1 - r and cy == y1 - 1 - r))
+    for cx, cy in (
+        (x0 + r, y0 + r),
+        (x1 - 1 - r, y0 + r),
+        (x0 + r, y1 - 1 - r),
+        (x1 - 1 - r, y1 - 1 - r),
+    ):
+        in_corner = (
+            (x < x0 + r and (cx == x0 + r)) or (x > x1 - 1 - r and cx == x1 - 1 - r)
+        ) and ((y < y0 + r and cy == y0 + r) or (y > y1 - 1 - r and cy == y1 - 1 - r))
         if in_corner:
             dx, dy = x - cx, y - cy
             return dx * dx + dy * dy <= r * r
@@ -159,7 +175,9 @@ def _stroke_round(buf, W, x0, y0, x1, y1, r, t, color):
     ir = max(0, r - t)
     for y in range(max(0, y0), y1):
         for x in range(max(0, x0), x1):
-            if _in_round(x, y, x0, y0, x1, y1, r) and not _in_round(x, y, ix0, iy0, ix1, iy1, ir):
+            if _in_round(x, y, x0, y0, x1, y1, r) and not _in_round(
+                x, y, ix0, iy0, ix1, iy1, ir
+            ):
                 i = (y * W + x) * 4
                 buf[i], buf[i + 1], buf[i + 2], buf[i + 3] = color
 
@@ -192,9 +210,7 @@ def branddocs_mark_png(width: int = 640, height: int = 160) -> bytes:
     stroke = 1
     font = ImageFont.load_default(size=size)
     bbox = draw.textbbox((0, 0), "BrandDocs", font=font, stroke_width=stroke)
-    while size > 12 and (
-        bbox[2] - bbox[0] > target_w or bbox[3] - bbox[1] > target_h
-    ):
+    while size > 12 and (bbox[2] - bbox[0] > target_w or bbox[3] - bbox[1] > target_h):
         size -= 4
         stroke = max(1, size // 48)
         font = ImageFont.load_default(size=size)
@@ -205,7 +221,9 @@ def branddocs_mark_png(width: int = 640, height: int = 160) -> bytes:
     x = (W - text_w) // 2 - bbox[0]
     y = (H - text_h) // 2 - bbox[1]
     brand_advance = int(round(draw.textlength("Brand", font=font)))
-    draw.text((x, y), "Brand", font=font, fill=_NAVY, stroke_width=stroke, stroke_fill=_NAVY)
+    draw.text(
+        (x, y), "Brand", font=font, fill=_NAVY, stroke_width=stroke, stroke_fill=_NAVY
+    )
     draw.text(
         (x + brand_advance, y),
         "Docs",
@@ -259,7 +277,7 @@ def branddocs_curve_png(width: int = 480, height: int = 200) -> bytes:
             x = x0 + (x1 - x0) * s // steps
             y = y0 + (y1 - y0) * s // steps
             _disc(buf, W, H, x, y, lw, _BLUE)
-    for (x, y) in pts:
+    for x, y in pts:
         _disc(buf, W, H, x, y, lw + _SS, _AMBER)
     rgba, ow, oh = _downsample(buf, W, H, _SS)
     return _png_bytes(rgba, ow, oh)

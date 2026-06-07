@@ -11,6 +11,7 @@ brand defined survives - and a brand-new title paragraph is appended only when t
 shell genuinely has no cover region (and then it is inserted before the first
 toc/body child so it lands on the cover, never after the TOC).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -35,7 +36,14 @@ PLACEHOLDER_TITLE = "{{title}}"
 # they are never the primary signal and never a matching rule that gates output.
 # Cover-slot DISCOVERY is structural (block-level SDTs + the cover-region
 # placeholder paragraphs); the model names each slot via ``comprehension``.
-_TITLE_PROMPT_TOKENS: tuple[str, ...] = ("insert title", "title", "titolo", "titel", "titre", "titulo")
+_TITLE_PROMPT_TOKENS: tuple[str, ...] = (
+    "insert title",
+    "title",
+    "titolo",
+    "titel",
+    "titre",
+    "titulo",
+)
 
 
 def _sdt_props(sdt):
@@ -130,7 +138,9 @@ def _iter_block_sdts(doc):
 
 def _cover_child_indices(doc) -> list[int]:
     """Return the top-level body-child indices that belong to the cover region."""
-    return [c["index"] for c in classify_body_children(doc) if c.get("region") == "cover"]
+    return [
+        c["index"] for c in classify_body_children(doc) if c.get("region") == "cover"
+    ]
 
 
 def _paragraph_is_placeholder_slot(p) -> bool:
@@ -253,7 +263,9 @@ def discover_cover(doc) -> tuple[list[dict], dict]:
 
     anchor_block = {
         "cover": {
-            "kind": schema.AnchorKind.SDT_ANCHORED.value if anchors else schema.AnchorKind.NONE.value,
+            "kind": schema.AnchorKind.SDT_ANCHORED.value
+            if anchors
+            else schema.AnchorKind.NONE.value,
             "slots_found": len(anchors),
         }
     }
@@ -317,8 +329,12 @@ def _sync_core_properties(doc, cover: Cover) -> None:
     props = getattr(doc, "core_properties", None)
     if props is None:
         return
-    title = textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", ""))
-    subtitle = textutil.runs_to_text(cover.subtitle or []) or str(cover.fields.get("subtitle", ""))
+    title = textutil.runs_to_text(cover.title or []) or str(
+        cover.fields.get("title", "")
+    )
+    subtitle = textutil.runs_to_text(cover.subtitle or []) or str(
+        cover.fields.get("subtitle", "")
+    )
     if title:
         props.title = title
     if subtitle:
@@ -346,14 +362,24 @@ def _cover_content_for(cover: Cover, binds_to: Optional[str]) -> Optional[str]:
     if not binds_to:
         return None
     if binds_to == "title":
-        return textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", "")) or None
+        return (
+            textutil.runs_to_text(cover.title or [])
+            or str(cover.fields.get("title", ""))
+            or None
+        )
     if binds_to == "subtitle":
-        return textutil.runs_to_text(cover.subtitle or []) or str(cover.fields.get("subtitle", "")) or None
+        return (
+            textutil.runs_to_text(cover.subtitle or [])
+            or str(cover.fields.get("subtitle", ""))
+            or None
+        )
     val = cover.fields.get(binds_to)
     return str(val) if val not in (None, "") else None
 
 
-def _compose_cover_comprehended(doc, cover: Cover, profile: dict, comp: dict, sink: list) -> set[str]:
+def _compose_cover_comprehended(
+    doc, cover: Cover, profile: dict, comp: dict, sink: list
+) -> set[str]:
     """Multi-slot, comprehension-steered cover reconciliation."""
     confidence = float(comp.get("confidence") or 0.0)
     slots = comp.get("cover_slots") or {}
@@ -403,7 +429,9 @@ def _compose_cover_comprehended(doc, cover: Cover, profile: dict, comp: dict, si
         # fill_rule == leave (or unknown): leave the slot untouched.
 
     # Append a brand-new title ONLY when there is no title-bearing slot at all.
-    title = textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", ""))
+    title = textutil.runs_to_text(cover.title or []) or str(
+        cover.fields.get("title", "")
+    )
     if title and not has_title_slot and not title_slot_filled:
         para = doc.add_paragraph(title)
         _apply_role_style(doc, para, profile, "cover.title")
@@ -419,9 +447,13 @@ def _compose_cover_comprehended(doc, cover: Cover, profile: dict, comp: dict, si
     return cleared
 
 
-def _compose_cover_deterministic(doc, cover: Cover, profile: dict, sink: list) -> set[str]:
+def _compose_cover_deterministic(
+    doc, cover: Cover, profile: dict, sink: list
+) -> set[str]:
     """Today's deterministic single-title cover fill (comprehension absent)."""
-    title = textutil.runs_to_text(cover.title or []) or str(cover.fields.get("title", ""))
+    title = textutil.runs_to_text(cover.title or []) or str(
+        cover.fields.get("title", "")
+    )
     if not title:
         return set()
 
@@ -479,7 +511,12 @@ def _resolve_anchor_element(doc, anchor_ref: str):
 
 
 def _fill_anchor_in_place(
-    doc, el, anchor_ref: str, content: str, profile: dict, binds_to: Optional[str] = None
+    doc,
+    el,
+    anchor_ref: str,
+    content: str,
+    profile: dict,
+    binds_to: Optional[str] = None,
 ) -> None:
     """FILL a cover anchor element in place, preserving run formatting.
 

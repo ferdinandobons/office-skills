@@ -22,6 +22,7 @@ The merge boundary is structurally incapable of writing a ``roles[*].resolver``
 or a ``surface`` id, so it can never widen the brand guarantee. Comprehension is
 frozen here and never re-invoked at generate time (idempotency, §6).
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -275,7 +276,9 @@ def check_membership(profile: dict, comp: dict) -> list[str]:
             )
 
     # (c) demo_classification region_ref ∈ region inventory.
-    for i, reg in enumerate((comp.get("demo_classification") or {}).get("regions") or []):
+    for i, reg in enumerate(
+        (comp.get("demo_classification") or {}).get("regions") or []
+    ):
         if not isinstance(reg, dict):
             continue
         ref = reg.get("region_ref")
@@ -286,7 +289,7 @@ def check_membership(profile: dict, comp: dict) -> list[str]:
             )
 
     # (d) role_annotations keys ∈ roles.
-    for rid in (comp.get("role_annotations") or {}):
+    for rid in comp.get("role_annotations") or {}:
         if rid not in role_ids:
             problems.append(
                 f"comprehension.role_annotations: role id {rid!r} not in roles "
@@ -360,12 +363,12 @@ def merge(
         if generated_by is not None:
             rejected["generated_by"] = dict(generated_by)
         profile["comprehension"] = rejected
-        return MergeResult(False, schema.ComprehensionStatus.REJECTED.value, sorted(problems))
+        return MergeResult(
+            False, schema.ComprehensionStatus.REJECTED.value, sorted(problems)
+        )
 
     # 3) Clean: write the canonical block with stable, sorted serialization.
-    shell_sha = (
-        (profile.get("provenance") or {}).get("shell") or {}
-    ).get("sha256")
+    shell_sha = ((profile.get("provenance") or {}).get("shell") or {}).get("sha256")
     canonical = _canonicalize(trial_comp, shell_sha, generated_by)
     profile["comprehension"] = canonical
 
@@ -378,7 +381,9 @@ def merge(
     return MergeResult(True, schema.ComprehensionStatus.PRESENT.value, [])
 
 
-def _canonicalize(comp: dict, shell_sha: Optional[str], generated_by: Optional[dict]) -> dict:
+def _canonicalize(
+    comp: dict, shell_sha: Optional[str], generated_by: Optional[dict]
+) -> dict:
     """Return the comprehension block with stable order and stamped provenance."""
     out = schema.empty_comprehension()
     out["status"] = schema.ComprehensionStatus.PRESENT.value
@@ -401,24 +406,32 @@ def _canonicalize(comp: dict, shell_sha: Optional[str], generated_by: Optional[d
     indexes = [i for i in (conventions.get("indexes") or []) if isinstance(i, dict)]
     sections = [s for s in (conventions.get("sections") or []) if isinstance(s, dict)]
     out["conventions"] = {
-        "indexes": sorted((dict(i) for i in indexes), key=lambda d: str(d.get("index_ref"))),
-        "sections": sorted((dict(s) for s in sections), key=lambda d: str(d.get("region_ref"))),
+        "indexes": sorted(
+            (dict(i) for i in indexes), key=lambda d: str(d.get("index_ref"))
+        ),
+        "sections": sorted(
+            (dict(s) for s in sections), key=lambda d: str(d.get("region_ref"))
+        ),
     }
 
     # role_annotations: sorted by role id.
     annotations = comp.get("role_annotations") or {}
     out["role_annotations"] = {
-        k: dict(annotations[k]) for k in sorted(annotations)
+        k: dict(annotations[k])
+        for k in sorted(annotations)
         if isinstance(annotations.get(k), dict)
     }
 
     # demo_classification.regions: sorted by region_ref.
     regions = [
-        r for r in ((comp.get("demo_classification") or {}).get("regions") or [])
+        r
+        for r in ((comp.get("demo_classification") or {}).get("regions") or [])
         if isinstance(r, dict)
     ]
     out["demo_classification"] = {
-        "regions": sorted((dict(r) for r in regions), key=lambda d: str(d.get("region_ref")))
+        "regions": sorted(
+            (dict(r) for r in regions), key=lambda d: str(d.get("region_ref"))
+        )
     }
     return out
 

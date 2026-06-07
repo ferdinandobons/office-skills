@@ -35,6 +35,7 @@ Design constraints (deliberate):
     (US-Letter @100 DPI = 850x1100; content pages mean-luma ~240-252; a blank
     page ~255).
 """
+
 from __future__ import annotations
 
 import json
@@ -59,7 +60,7 @@ ImageInput = Union["Image.Image", str, Path]
 # ---------------------------------------------------------------------------
 # Render configuration
 # ---------------------------------------------------------------------------
-DEFAULT_DPI: int = 100        # 850x1100 for US-Letter portrait; enough for proxies
+DEFAULT_DPI: int = 100  # 850x1100 for US-Letter portrait; enough for proxies
 RENDER_TIMEOUT_S: int = 90
 OCR_TIMEOUT_S: int = 30
 OCR_TEXT_LIMIT: int = 4000
@@ -71,11 +72,11 @@ OCR_TERM_LIMIT: int = 80
 # the blank threshold sits just under pure white; the ink fraction guards against
 # a near-white page that still carries a faint legitimate mark.
 # ---------------------------------------------------------------------------
-BLANK_LUMA_MIN: float = 252.0      # mean luma at/above which a page is "near blank"
+BLANK_LUMA_MIN: float = 252.0  # mean luma at/above which a page is "near blank"
 BLANK_INK_FRAC_MAX: float = 0.004  # max fraction of "ink" pixels to still call it blank
-INK_LUMA_THRESHOLD: int = 180      # a pixel below this counts as "ink"
-EDGE_MARGIN_FRAC: float = 0.012    # edge band width = 1.2% of the side (printable margin)
-EDGE_INK_FRAC_MAX: float = 0.004   # ink allowed in an edge band before flagging
+INK_LUMA_THRESHOLD: int = 180  # a pixel below this counts as "ink"
+EDGE_MARGIN_FRAC: float = 0.012  # edge band width = 1.2% of the side (printable margin)
+EDGE_INK_FRAC_MAX: float = 0.004  # ink allowed in an edge band before flagging
 
 # ---------------------------------------------------------------------------
 # Manifest constants
@@ -167,8 +168,11 @@ def render_to_pngs(
 
         if quicklook_only:
             return _render_quicklook_thumbnail(
-                document, out_dir, timeout_s=timeout_s,
-                render_errors=render_errors, render_warnings=render_warnings,
+                document,
+                out_dir,
+                timeout_s=timeout_s,
+                render_errors=render_errors,
+                render_warnings=render_warnings,
                 reason="because LibreOffice visual pipeline is unavailable",
             )
 
@@ -179,27 +183,37 @@ def render_to_pngs(
             lo_profile = tmp / "lo-profile"
             soffice = subprocess.run(
                 _soffice_convert_cmd(document, pdf_dir, lo_profile),
-                capture_output=True, timeout=timeout_s, check=False,
+                capture_output=True,
+                timeout=timeout_s,
+                check=False,
             )
             if soffice.returncode != 0:
                 _append_render_error(
                     render_errors,
                     "soffice convert failed: "
-                    + (_short_output(soffice.stderr)
-                       or _short_output(soffice.stdout)
-                       or f"exit code {soffice.returncode}"),
+                    + (
+                        _short_output(soffice.stderr)
+                        or _short_output(soffice.stdout)
+                        or f"exit code {soffice.returncode}"
+                    ),
                 )
                 return _render_quicklook_thumbnail(
-                    document, out_dir, timeout_s=timeout_s,
-                    render_errors=render_errors, render_warnings=render_warnings,
+                    document,
+                    out_dir,
+                    timeout_s=timeout_s,
+                    render_errors=render_errors,
+                    render_warnings=render_warnings,
                     reason="after soffice failure",
                 )
             pdfs = list(pdf_dir.glob("*.pdf"))
             if not pdfs:
                 _append_render_error(render_errors, "soffice convert produced no PDF")
                 return _render_quicklook_thumbnail(
-                    document, out_dir, timeout_s=timeout_s,
-                    render_errors=render_errors, render_warnings=render_warnings,
+                    document,
+                    out_dir,
+                    timeout_s=timeout_s,
+                    render_errors=render_errors,
+                    render_warnings=render_warnings,
                     reason="after soffice produced no PDF",
                 )
             pdf = pdfs[0]
@@ -215,8 +229,11 @@ def render_to_pngs(
                 return pngs
             else:
                 return _render_quicklook_thumbnail(
-                    document, out_dir, timeout_s=timeout_s,
-                    render_errors=render_errors, render_warnings=render_warnings,
+                    document,
+                    out_dir,
+                    timeout_s=timeout_s,
+                    render_errors=render_errors,
+                    render_warnings=render_warnings,
                     reason="after PDF rasterization failure",
                 )
     except subprocess.TimeoutExpired as exc:
@@ -260,9 +277,11 @@ def _rasterize_pdf_to_pngs(
                 _append_render_error(
                     render_errors,
                     "pdftoppm failed: "
-                    + (_short_output(toppm.stderr)
-                       or _short_output(toppm.stdout)
-                       or f"exit code {toppm.returncode}"),
+                    + (
+                        _short_output(toppm.stderr)
+                        or _short_output(toppm.stdout)
+                        or f"exit code {toppm.returncode}"
+                    ),
                 )
     else:
         _append_render_error(render_errors, "pdftoppm unavailable")
@@ -279,7 +298,9 @@ def _rasterize_pdf_to_pngs(
     return []
 
 
-def _rasterize_pdf_with_pymupdf(pdf: Path, out_dir: Path, *, dpi: int) -> tuple[list[Path], str | None]:
+def _rasterize_pdf_with_pymupdf(
+    pdf: Path, out_dir: Path, *, dpi: int
+) -> tuple[list[Path], str | None]:
     try:
         import fitz  # type: ignore[import-not-found]
     except Exception as exc:
@@ -321,7 +342,9 @@ def _render_quicklook_thumbnail(
     """
     qlmanage = shutil.which("qlmanage")
     if qlmanage is None:
-        _append_render_error(render_errors, "Quick Look fallback unavailable: qlmanage not found")
+        _append_render_error(
+            render_errors, "Quick Look fallback unavailable: qlmanage not found"
+        )
         return []
     try:
         proc = subprocess.run(
@@ -340,9 +363,11 @@ def _render_quicklook_thumbnail(
         _append_render_error(
             render_errors,
             "Quick Look fallback failed: "
-            + (_short_output(proc.stderr)
-               or _short_output(proc.stdout)
-               or f"exit code {proc.returncode}"),
+            + (
+                _short_output(proc.stderr)
+                or _short_output(proc.stdout)
+                or f"exit code {proc.returncode}"
+            ),
         )
         return []
 
@@ -361,7 +386,9 @@ def _render_quicklook_thumbnail(
                 target.unlink()
             produced.replace(target)
         except OSError as exc:
-            _append_render_error(render_errors, f"Quick Look fallback could not stage PNG: {exc}")
+            _append_render_error(
+                render_errors, f"Quick Look fallback could not stage PNG: {exc}"
+            )
             return []
 
     _append_render_warning(
@@ -436,7 +463,9 @@ def _as_luma(img: ImageInput) -> Image.Image | None:
         return None
 
 
-def _ink_fraction(luma: Image.Image, box: tuple[int, int, int, int] | None = None) -> float:
+def _ink_fraction(
+    luma: Image.Image, box: tuple[int, int, int, int] | None = None
+) -> float:
     """Fraction of pixels darker than :data:`INK_LUMA_THRESHOLD` in ``box``.
 
     ``box`` is an ``(left, top, right, bottom)`` crop or None for the whole image.
@@ -447,7 +476,7 @@ def _ink_fraction(luma: Image.Image, box: tuple[int, int, int, int] | None = Non
         return 0.0
     # Histogram bin i = count of pixels with luma == i.
     hist = region.histogram()
-    ink = sum(hist[: INK_LUMA_THRESHOLD])
+    ink = sum(hist[:INK_LUMA_THRESHOLD])
     return ink / total
 
 
@@ -475,15 +504,17 @@ def check_blank_page(
         return []
     hist = luma.histogram()
     mean = sum(i * c for i, c in enumerate(hist)) / total
-    ink = sum(hist[: INK_LUMA_THRESHOLD]) / total
+    ink = sum(hist[:INK_LUMA_THRESHOLD]) / total
     if mean >= luma_min and ink <= ink_frac_max:
-        return [Finding(
-            "visual.blank_page",
-            schema.Severity.WARNING.value,
-            f"page {page_index + 1} renders blank/near-blank "
-            f"(mean luma {mean:.1f}, ink {ink:.4f})",
-            location=f"page:{page_index + 1}",
-        )]
+        return [
+            Finding(
+                "visual.blank_page",
+                schema.Severity.WARNING.value,
+                f"page {page_index + 1} renders blank/near-blank "
+                f"(mean luma {mean:.1f}, ink {ink:.4f})",
+                location=f"page:{page_index + 1}",
+            )
+        ]
     return []
 
 
@@ -522,13 +553,15 @@ def check_edge_bleed(
     for side, box in bands.items():
         frac = _ink_fraction(luma, box)
         if frac > edge_ink_frac_max:
-            findings.append(Finding(
-                "visual.edge_bleed",
-                schema.Severity.WARNING.value,
-                f"ink in {side} margin band on page {page_index + 1} "
-                f"(ink {frac:.4f} > {edge_ink_frac_max})",
-                location=f"page:{page_index + 1}:{side}",
-            ))
+            findings.append(
+                Finding(
+                    "visual.edge_bleed",
+                    schema.Severity.WARNING.value,
+                    f"ink in {side} margin band on page {page_index + 1} "
+                    f"(ink {frac:.4f} > {edge_ink_frac_max})",
+                    location=f"page:{page_index + 1}:{side}",
+                )
+            )
     return findings
 
 
@@ -546,11 +579,13 @@ def check_page_count_sane(
     is currently advisory only.
     """
     if not images_or_paths:
-        return [Finding(
-            "visual.no_pages",
-            schema.Severity.WARNING.value,
-            "output rendered zero pages",
-        )]
+        return [
+            Finding(
+                "visual.no_pages",
+                schema.Severity.WARNING.value,
+                "output rendered zero pages",
+            )
+        ]
     return []
 
 
@@ -638,18 +673,22 @@ def ocr_findings(report: dict) -> list[Finding]:
     for hit in report.get("hits") or []:
         page = hit.get("page")
         term = hit.get("term")
-        findings.append(Finding(
-            "visual.ocr_residual_text",
-            schema.Severity.WARNING.value,
-            f"OCR saw captured template text still visible: {term!r}",
-            location=f"page:{page}" if page else None,
-        ))
+        findings.append(
+            Finding(
+                "visual.ocr_residual_text",
+                schema.Severity.WARNING.value,
+                f"OCR saw captured template text still visible: {term!r}",
+                location=f"page:{page}" if page else None,
+            )
+        )
     if report.get("status") in {"failed", "partial"} and report.get("errors"):
-        findings.append(Finding(
-            "visual.ocr_degraded",
-            schema.Severity.INFO.value,
-            "OCR visible-text scan did not complete for every rendered page",
-        ))
+        findings.append(
+            Finding(
+                "visual.ocr_degraded",
+                schema.Severity.INFO.value,
+                "OCR visible-text scan did not complete for every rendered page",
+            )
+        )
     return findings
 
 
@@ -690,7 +729,9 @@ def _ocr_png(tesseract: str, png: Path, *, timeout_s: int) -> tuple[str, str | N
 
 def _ocr_terms(profile: dict) -> list[str]:
     terms: list[str] = []
-    for term in checks_deterministic.captured_template_texts(profile, include_surface_prompts=True):
+    for term in checks_deterministic.captured_template_texts(
+        profile, include_surface_prompts=True
+    ):
         cleaned = _normalize_ocr_space(str(term))
         if _has_ocr_signal(cleaned):
             terms.append(cleaned)
@@ -784,80 +825,104 @@ def derive_visual_checklist(profile: dict) -> list[dict]:
     qa = profile.get("qa") or {}
 
     if skeleton:
-        regions = [r.get("region") for r in skeleton if isinstance(r, dict) and r.get("region")]
-        items.append({
-            "id": "regions_present",
-            "what": f"Each expected region appears in the expected order: {regions}",
-            "derived_from": "structure.skeleton[*].region + order",
-            "severity_hint": "WARNING",
-        })
+        regions = [
+            r.get("region") for r in skeleton if isinstance(r, dict) and r.get("region")
+        ]
+        items.append(
+            {
+                "id": "regions_present",
+                "what": f"Each expected region appears in the expected order: {regions}",
+                "derived_from": "structure.skeleton[*].region + order",
+                "severity_hint": "WARNING",
+            }
+        )
 
     if anchors.get("cover"):
-        items.append({
-            "id": "cover_correct",
-            "what": "The cover shows the bound title, no duplicate title, no residual demo prompt",
-            "derived_from": "anchors.cover + comprehension.cover_slots",
-            "severity_hint": "WARNING",
-        })
+        items.append(
+            {
+                "id": "cover_correct",
+                "what": "The cover shows the bound title, no duplicate title, no residual demo prompt",
+                "derived_from": "anchors.cover + comprehension.cover_slots",
+                "severity_hint": "WARNING",
+            }
+        )
 
     demo_region = sub.get("demo_region") if isinstance(sub, dict) else None
-    if anchors.get("demo_region") or (isinstance(demo_region, dict) and demo_region.get("present")):
-        items.append({
-            "id": "no_residual_placeholder",
-            "what": "No template placeholder/demo text is visible in the rendered output",
-            "derived_from": "surface.<kind>.demo_region + comprehension.cover_slots[*].demo_value",
-            "severity_hint": "WARNING",
-        })
+    if anchors.get("demo_region") or (
+        isinstance(demo_region, dict) and demo_region.get("present")
+    ):
+        items.append(
+            {
+                "id": "no_residual_placeholder",
+                "what": "No template placeholder/demo text is visible in the rendered output",
+                "derived_from": "surface.<kind>.demo_region + comprehension.cover_slots[*].demo_value",
+                "severity_hint": "WARNING",
+            }
+        )
 
     if theme.get("colors"):
-        items.append({
-            "id": "palette_on_brand",
-            "what": "On-screen colors belong to the brand palette",
-            "derived_from": "theme.colors + theme.palette_roles",
-            "severity_hint": "INFO",
-        })
+        items.append(
+            {
+                "id": "palette_on_brand",
+                "what": "On-screen colors belong to the brand palette",
+                "derived_from": "theme.colors + theme.palette_roles",
+                "severity_hint": "INFO",
+            }
+        )
 
     if role_index:
-        items.append({
-            "id": "roles_styled",
-            "what": "Semantic blocks (heading/list/callout/table/quote/caption) "
-                    "appear with the brand style, not 'Normal'",
-            "derived_from": "roles._index",
-            "severity_hint": "WARNING",
-        })
+        items.append(
+            {
+                "id": "roles_styled",
+                "what": "Semantic blocks (heading/list/callout/table/quote/caption) "
+                "appear with the brand style, not 'Normal'",
+                "derived_from": "roles._index",
+                "severity_hint": "WARNING",
+            }
+        )
 
     # Constant items: always relevant for every kind; reinforced by L1 findings.
-    items.append({
-        "id": "no_overlap",
-        "what": "No overlapping or clipped text/shapes",
-        "derived_from": "constant; reinforced by l1_findings visual.edge_bleed",
-        "severity_hint": "WARNING",
-    })
-    items.append({
-        "id": "no_blank_pages",
-        "what": "No unexpected blank/broken pages",
-        "derived_from": "constant; reinforced by l1_findings visual.blank_page",
-        "severity_hint": "WARNING",
-    })
+    items.append(
+        {
+            "id": "no_overlap",
+            "what": "No overlapping or clipped text/shapes",
+            "derived_from": "constant; reinforced by l1_findings visual.edge_bleed",
+            "severity_hint": "WARNING",
+        }
+    )
+    items.append(
+        {
+            "id": "no_blank_pages",
+            "what": "No unexpected blank/broken pages",
+            "derived_from": "constant; reinforced by l1_findings visual.blank_page",
+            "severity_hint": "WARNING",
+        }
+    )
 
     if _profile_has_charts(profile):
-        items.append({
-            "id": "charts_rendered",
-            "what": "Every chart is drawn correctly (axes/legend/data), not an empty box",
-            "derived_from": "roles._index chart.* / components / artifact_catalog charts",
-            "severity_hint": "WARNING",
-        })
+        items.append(
+            {
+                "id": "charts_rendered",
+                "what": "Every chart is drawn correctly (axes/legend/data), not an empty box",
+                "derived_from": "roles._index chart.* / components / artifact_catalog charts",
+                "severity_hint": "WARNING",
+            }
+        )
 
     oc = qa.get("overflow_capability")
-    if oc in (schema.OverflowCapability.RENDER.value,
-              schema.OverflowCapability.ESTIMATOR.value,
-              schema.OverflowCapability.CELLFIT.value):
-        items.append({
-            "id": "overflow_clean",
-            "what": "No content beyond the printable margins",
-            "derived_from": f"qa.overflow_capability={oc}",
-            "severity_hint": "WARNING",
-        })
+    if oc in (
+        schema.OverflowCapability.RENDER.value,
+        schema.OverflowCapability.ESTIMATOR.value,
+        schema.OverflowCapability.CELLFIT.value,
+    ):
+        items.append(
+            {
+                "id": "overflow_clean",
+                "what": "No content beyond the printable margins",
+                "derived_from": f"qa.overflow_capability={oc}",
+                "severity_hint": "WARNING",
+            }
+        )
 
     return items
 
@@ -865,7 +930,9 @@ def derive_visual_checklist(profile: dict) -> list[dict]:
 def _profile_has_charts(profile: dict) -> bool:
     """True if the profile evidences any chart (role, component, or catalog)."""
     roles = profile.get("roles") or {}
-    if any(isinstance(r, str) and r.startswith("chart") for r in roles.get("_index", [])):
+    if any(
+        isinstance(r, str) and r.startswith("chart") for r in roles.get("_index", [])
+    ):
         return True
     components = profile.get("components") or {}
     if any("chart" in str(k).lower() for k in components):
@@ -911,13 +978,15 @@ def build_visual_manifest(
             rel = png.relative_to(out_dir).as_posix()
         except ValueError:
             rel = png.name
-        pages.append({
-            "index": i + 1,
-            "png": rel,
-            "width": w,
-            "height": h,
-            "orientation": _orientation(w, h),
-        })
+        pages.append(
+            {
+                "index": i + 1,
+                "png": rel,
+                "width": w,
+                "height": h,
+                "orientation": _orientation(w, h),
+            }
+        )
 
     if degraded is None:
         degraded = not renderers_ok
@@ -940,7 +1009,8 @@ def build_visual_manifest(
             }
             for f in l1_findings
         ],
-        "ocr": ocr_report or _empty_ocr_report(profile, reason="not requested by caller"),
+        "ocr": ocr_report
+        or _empty_ocr_report(profile, reason="not requested by caller"),
         "checklist": derive_visual_checklist(profile),
         "environment": visual_environment_summary(
             environment_status,

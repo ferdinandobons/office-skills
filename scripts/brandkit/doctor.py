@@ -10,7 +10,10 @@ from pathlib import Path
 
 REQUIRED = ("docx", "pptx", "openpyxl", "lxml", "PIL")
 OPTIONAL_PYTHON = {"fitz": "PyMuPDF PDF raster fallback"}
-OPTIONAL_BINARIES = {"soffice": "visual DOCX/PPTX/XLSX render", "pdftoppm": "PDF to PNG visual proof"}
+OPTIONAL_BINARIES = {
+    "soffice": "visual DOCX/PPTX/XLSX render",
+    "pdftoppm": "PDF to PNG visual proof",
+}
 OPTIONAL_OCR_BINARIES = {"tesseract": "optional OCR visible-text audit"}
 PYTHON_INSTALL_HINT = "python -m pip install -r requirements.txt"
 OPTIONAL_PYTHON_INSTALL_HINTS = {
@@ -48,8 +51,7 @@ VISUAL_PIPELINE_TIMEOUT_S = 45
 def probe() -> dict:
     deps = {name: importlib.util.find_spec(name) is not None for name in REQUIRED}
     optional_deps = {
-        name: importlib.util.find_spec(name) is not None
-        for name in OPTIONAL_PYTHON
+        name: importlib.util.find_spec(name) is not None for name in OPTIONAL_PYTHON
     }
     bins: dict[str, bool] = {}
     paths: dict[str, str | None] = {}
@@ -76,7 +78,10 @@ def probe() -> dict:
     if visual_ok:
         visual_ok, visual_error = _probe_visual_pipeline(
             paths,
-            {"pdftoppm": bool(bins.get("pdftoppm")), "fitz": bool(optional_deps.get("fitz"))},
+            {
+                "pdftoppm": bool(bins.get("pdftoppm")),
+                "fitz": bool(optional_deps.get("fitz")),
+            },
         )
         if visual_error:
             errors["visual_qa"] = visual_error
@@ -147,14 +152,20 @@ def _soffice_app_signature_error(path: str) -> str | None:
         return f"could not verify LibreOffice.app signature: {exc}"
     if proc.returncode == 0:
         return None
-    detail = _short_output(proc.stderr) or _short_output(proc.stdout) or f"exit code {proc.returncode}"
+    detail = (
+        _short_output(proc.stderr)
+        or _short_output(proc.stdout)
+        or f"exit code {proc.returncode}"
+    )
     return f"LibreOffice.app signature invalid: {detail}"
 
 
 def _libreoffice_app_for_soffice(path: str) -> Path | None:
     candidates = [
         Path("/Applications/LibreOffice.app"),
-        Path(path).resolve().parents[2] if len(Path(path).resolve().parents) > 2 else None,
+        Path(path).resolve().parents[2]
+        if len(Path(path).resolve().parents) > 2
+        else None,
     ]
     for candidate in candidates:
         if candidate and candidate.name == "LibreOffice.app" and candidate.is_dir():
@@ -281,11 +292,16 @@ def _probe_visual_document(
     if not pdfs:
         return False, "soffice convert produced no PDF"
 
-    rasterizers = rasterizers or {"pdftoppm": bool(paths.get("pdftoppm")), "fitz": False}
+    rasterizers = rasterizers or {
+        "pdftoppm": bool(paths.get("pdftoppm")),
+        "fitz": False,
+    }
     pdftoppm_path = paths.get("pdftoppm") or "pdftoppm"
     pdftoppm_error = None
     if rasterizers.get("pdftoppm"):
-        ok, pdftoppm_error = _rasterize_pdf_with_pdftoppm(pdftoppm_path, pdfs[0], png_dir)
+        ok, pdftoppm_error = _rasterize_pdf_with_pdftoppm(
+            pdftoppm_path, pdfs[0], png_dir
+        )
         if ok:
             return True, None
     if rasterizers.get("fitz"):
@@ -293,12 +309,17 @@ def _probe_visual_document(
         if ok:
             return True, None
         if pdftoppm_error:
-            return False, f"pdftoppm failed: {pdftoppm_error}; PyMuPDF failed: {pymupdf_error}"
+            return (
+                False,
+                f"pdftoppm failed: {pdftoppm_error}; PyMuPDF failed: {pymupdf_error}",
+            )
         return False, f"PyMuPDF failed: {pymupdf_error}"
     return False, pdftoppm_error or "no PDF rasterizer available"
 
 
-def _rasterize_pdf_with_pdftoppm(pdftoppm_path: str, pdf: Path, png_dir: Path) -> tuple[bool, str | None]:
+def _rasterize_pdf_with_pdftoppm(
+    pdftoppm_path: str, pdf: Path, png_dir: Path
+) -> tuple[bool, str | None]:
     try:
         toppm = subprocess.run(
             [
@@ -326,7 +347,9 @@ def _rasterize_pdf_with_pdftoppm(pdftoppm_path: str, pdf: Path, png_dir: Path) -
     return True, None
 
 
-def _rasterize_pdf_with_pymupdf(pdf: Path, png_dir: Path, *, dpi: int) -> tuple[bool, str | None]:
+def _rasterize_pdf_with_pymupdf(
+    pdf: Path, png_dir: Path, *, dpi: int
+) -> tuple[bool, str | None]:
     try:
         import fitz  # type: ignore[import-not-found]
     except Exception as exc:
@@ -411,7 +434,9 @@ def print_report() -> None:
     if status.get("ocr_qa"):
         print("OCR QA: optional visible-text scan available")
     else:
-        print("OCR QA disabled; install optional OCR engine for rendered residual-text checks")
+        print(
+            "OCR QA disabled; install optional OCR engine for rendered residual-text checks"
+        )
     for hint in install_hints(status):
         print(hint)
 
@@ -419,12 +444,15 @@ def print_report() -> None:
 def install_hints(status: dict) -> list[str]:
     """Return actionable install/repair hints for unavailable dependencies."""
     hints: list[str] = []
-    missing_python = [name for name, ok in status.get("python_deps", {}).items() if not ok]
+    missing_python = [
+        name for name, ok in status.get("python_deps", {}).items() if not ok
+    ]
     if missing_python:
         hints.append(
             "install:python: "
             f"{PYTHON_INSTALL_HINT}  # missing: {', '.join(sorted(missing_python))}"
         )
+
     def _binary_hints(bins: dict, paths: dict) -> None:
         for name, ok in (bins or {}).items():
             if ok:
@@ -437,7 +465,9 @@ def install_hints(status: dict) -> list[str]:
                 hints.append(f"{action}:{name}{detail}: {hint}")
 
     _binary_hints(status.get("binaries", {}), status.get("binary_paths") or {})
-    _binary_hints(status.get("ocr_binaries") or {}, status.get("ocr_binary_paths") or {})
+    _binary_hints(
+        status.get("ocr_binaries") or {}, status.get("ocr_binary_paths") or {}
+    )
     optional = status.get("optional_python_deps") or {}
     binaries = status.get("binaries") or {}
     if not binaries.get("pdftoppm") and not optional.get("fitz"):

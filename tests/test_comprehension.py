@@ -7,6 +7,7 @@ exactly the path CI exercises. The comprehension block is additive and optional,
 so a profile without it (every other test) stays valid and on the deterministic
 path.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,14 +46,21 @@ def _valid_comp() -> dict:
         },
         "conventions": {
             "indexes": [
-                {"index_ref": "tot.1", "reconcile": "regenerate",
-                 "seq_id": "Table", "feeds_from_role_id": "caption", "kind": "table_index"}
+                {
+                    "index_ref": "tot.1",
+                    "reconcile": "regenerate",
+                    "seq_id": "Table",
+                    "feeds_from_role_id": "caption",
+                    "kind": "table_index",
+                }
             ],
             "sections": [{"region_ref": "body.demo", "required": False}],
         },
         "role_annotations": {"caption": {"purpose": "captions"}},
         "demo_classification": {
-            "regions": [{"region_ref": "body.demo", "verdict": "demo", "evidence": "sample"}]
+            "regions": [
+                {"region_ref": "body.demo", "verdict": "demo", "evidence": "sample"}
+            ]
         },
     }
 
@@ -125,7 +133,9 @@ class MembershipFailClosedTest(unittest.TestCase):
         namespace-guarded resolver-consistency check which no-ops on empty."""
         prof = schema.build_envelope("docx", {"name": "t"})  # no surfaced fields
         prof["provenance"]["shell"]["sha256"] = "x"
-        comp = {"conventions": {"indexes": [{"index_ref": "ghost", "reconcile": "clear"}]}}
+        comp = {
+            "conventions": {"indexes": [{"index_ref": "ghost", "reconcile": "clear"}]}
+        }
         res = comp_mod.merge(prof, comp)
         self.assertFalse(res.ok)
         self.assertTrue(any("ghost" in p and "fields" in p for p in res.problems))
@@ -158,8 +168,10 @@ class GateWiringTest(unittest.TestCase):
         report = run_qa(None, prof, mode="verify", qa="fast", shell=None)
         self.assertFalse(report.passed)
         self.assertTrue(
-            any(f.check == "comprehension_targets_exist" and f.severity == "ERROR"
-                for f in report.findings),
+            any(
+                f.check == "comprehension_targets_exist" and f.severity == "ERROR"
+                for f in report.findings
+            ),
             [f.message for f in report.findings],
         )
 
@@ -225,15 +237,28 @@ class CliComprehendTest(unittest.TestCase):
                 template = tmp / "t.docx"
                 _synthetic_template(template)
                 self.assertEqual(
-                    main(["extract", "--name", "acme", "--template", str(template),
-                          "--scope", "project"]), 0
+                    main(
+                        [
+                            "extract",
+                            "--name",
+                            "acme",
+                            "--template",
+                            str(template),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
                 )
                 # comprehend-input prints a valid bundle.
                 import io
                 from contextlib import redirect_stdout
+
                 buf = io.StringIO()
                 with redirect_stdout(buf):
-                    rc = main(["comprehend-input", "--name", "acme", "--scope", "project"])
+                    rc = main(
+                        ["comprehend-input", "--name", "acme", "--scope", "project"]
+                    )
                 self.assertEqual(rc, 0)
                 bundle = json.loads(buf.getvalue())
                 self.assertIn("inventories", bundle["facts"])
@@ -243,34 +268,71 @@ class CliComprehendTest(unittest.TestCase):
                 # single hardcoded "title". The synthetic ``{{title}}`` placeholder
                 # surfaces as a ``para.<i>`` slot.
                 title_anchor = next(
-                    a["id"] for a in anchors
+                    a["id"]
+                    for a in anchors
                     if "{{title}}" in (a.get("placeholder") or "")
                 )
                 self.assertTrue(title_anchor.startswith("para."), anchor_ids)
 
                 # comprehend merges a valid block over the real surfaced anchor.
                 comp = tmp / "comp.json"
-                comp.write_text(json.dumps({
-                    "cover_slots": {title_anchor: {"fill_rule": "in_place",
-                                                   "binds_to": "title", "demo_value": "{{title}}"}}
-                }), encoding="utf-8")
-                self.assertEqual(
-                    main(["comprehend", "--name", "acme", "--input", str(comp),
-                          "--scope", "project"]), 0
+                comp.write_text(
+                    json.dumps(
+                        {
+                            "cover_slots": {
+                                title_anchor: {
+                                    "fill_rule": "in_place",
+                                    "binds_to": "title",
+                                    "demo_value": "{{title}}",
+                                }
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
                 )
-                prof = json.loads((tmp / "brand-kit" / "acme" / "profile.json").read_text())
+                self.assertEqual(
+                    main(
+                        [
+                            "comprehend",
+                            "--name",
+                            "acme",
+                            "--input",
+                            str(comp),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    0,
+                )
+                prof = json.loads(
+                    (tmp / "brand-kit" / "acme" / "profile.json").read_text()
+                )
                 self.assertEqual(prof["comprehension"]["status"], "present")
                 self.assertTrue(prof["comprehension"]["source_shell_sha256"])
 
                 # A dangling ref is rejected at the CLI boundary (exit 1).
                 bad = tmp / "bad.json"
-                bad.write_text(json.dumps({"cover_slots": {"ghost": {"fill_rule": "in_place"}}}),
-                               encoding="utf-8")
-                self.assertEqual(
-                    main(["comprehend", "--name", "acme", "--input", str(bad),
-                          "--scope", "project"]), 1
+                bad.write_text(
+                    json.dumps({"cover_slots": {"ghost": {"fill_rule": "in_place"}}}),
+                    encoding="utf-8",
                 )
-                prof2 = json.loads((tmp / "brand-kit" / "acme" / "profile.json").read_text())
+                self.assertEqual(
+                    main(
+                        [
+                            "comprehend",
+                            "--name",
+                            "acme",
+                            "--input",
+                            str(bad),
+                            "--scope",
+                            "project",
+                        ]
+                    ),
+                    1,
+                )
+                prof2 = json.loads(
+                    (tmp / "brand-kit" / "acme" / "profile.json").read_text()
+                )
                 self.assertEqual(prof2["comprehension"]["status"], "rejected")
             finally:
                 os.chdir(old)

@@ -36,6 +36,7 @@ The 12 theme slots, in OOXML document order, are:
 (``dk1``/``lt1`` are frequently authored as ``a:sysClr`` - windowText / window -
 hence the ``lastClr`` resolution.)
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -49,9 +50,18 @@ except Exception:  # pragma: no cover - exercised only in degraded envs
 # Canonical slot order and the DrawingML namespace.
 # ---------------------------------------------------------------------------
 THEME_SLOTS: tuple[str, ...] = (
-    "dk1", "lt1", "dk2", "lt2",
-    "accent1", "accent2", "accent3", "accent4", "accent5", "accent6",
-    "hlink", "folHlink",
+    "dk1",
+    "lt1",
+    "dk2",
+    "lt2",
+    "accent1",
+    "accent2",
+    "accent3",
+    "accent4",
+    "accent5",
+    "accent6",
+    "hlink",
+    "folHlink",
 )
 
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -99,6 +109,7 @@ def hex_to_rgb(value: str) -> tuple[int, int, int]:
 
 def rgb_to_hex(r: int, g: int, b: int) -> str:
     """Return the normalized ``RRGGBB`` hex for 0-255 channel values (clamped)."""
+
     def clamp(x: int) -> int:
         return max(0, min(255, int(round(x))))
 
@@ -299,6 +310,7 @@ def relative_luminance(hex_value: str) -> float:
     Implements the sRGB linearization from WCAG 2.1 (gamma-expanded channels,
     weighted 0.2126 R + 0.7152 G + 0.0722 B).
     """
+
     def chan(c: int) -> float:
         cs = c / 255.0
         return cs / 12.92 if cs <= 0.03928 else ((cs + 0.055) / 1.055) ** 2.4

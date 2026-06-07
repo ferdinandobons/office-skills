@@ -8,6 +8,7 @@ enforcement point: a writer can only ever apply a style the resolver named AND
 the shell actually carries. There is no literal style name anywhere in the
 writers - every style comes from the profile via :func:`lookup_style`.
 """
+
 from __future__ import annotations
 
 

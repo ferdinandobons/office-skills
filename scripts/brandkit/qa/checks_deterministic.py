@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Deterministic L0 checks for M1."""
+
 from __future__ import annotations
 
 import hashlib
@@ -22,7 +23,13 @@ def check_profile(profile: dict) -> list[Finding]:
     for rid in (profile.get("roles") or {}).get("_index", []):
         entry = profile.get("roles", {}).get(rid)
         if not entry or not entry.get("resolver"):
-            findings.append(Finding("every_role_resolves", schema.Severity.ERROR.value, f"{rid} has no resolver"))
+            findings.append(
+                Finding(
+                    "every_role_resolves",
+                    schema.Severity.ERROR.value,
+                    f"{rid} has no resolver",
+                )
+            )
     return findings
 
 
@@ -35,9 +42,7 @@ def check_shell_provenance(shell, profile: dict) -> list[Finding]:
     """
     if shell is None:
         return []
-    recorded = (
-        (profile.get("provenance") or {}).get("shell") or {}
-    ).get("sha256")
+    recorded = ((profile.get("provenance") or {}).get("shell") or {}).get("sha256")
     if not recorded:
         return []
 
@@ -100,7 +105,7 @@ def check_resolver_targets(shell, profile: dict) -> list[Finding]:
     if shell is None:
         return []
     kind = profile.get("kind")
-    roles = (profile.get("roles") or {})
+    roles = profile.get("roles") or {}
     role_ids = [r for r in roles if r != "_index"]
     findings: list[Finding] = []
     try:
@@ -211,7 +216,10 @@ def check_comprehension_targets(profile: dict) -> list[Finding]:
     the merge writer can never disagree.
     """
     comp = profile.get("comprehension")
-    if not isinstance(comp, dict) or comp.get("status") != schema.ComprehensionStatus.PRESENT.value:
+    if (
+        not isinstance(comp, dict)
+        or comp.get("status") != schema.ComprehensionStatus.PRESENT.value
+    ):
         return []
     findings: list[Finding] = []
     for problem in comprehensionmod.check_membership(profile, comp):
@@ -223,12 +231,17 @@ def check_comprehension_targets(profile: dict) -> list[Finding]:
 
 def _present_comprehension(profile: dict) -> dict | None:
     comp = profile.get("comprehension")
-    if isinstance(comp, dict) and comp.get("status") == schema.ComprehensionStatus.PRESENT.value:
+    if (
+        isinstance(comp, dict)
+        and comp.get("status") == schema.ComprehensionStatus.PRESENT.value
+    ):
         return comp
     return None
 
 
-def captured_template_texts(profile: dict, *, include_surface_prompts: bool = False) -> list[str]:
+def captured_template_texts(
+    profile: dict, *, include_surface_prompts: bool = False
+) -> list[str]:
     """Collect every demo/placeholder text the extractor captured for THIS template.
 
     Model-free and language-agnostic: the comparison strings come from the
@@ -338,7 +351,9 @@ def check_no_orphan_cover_placeholder(text: str, profile: dict) -> list[Finding]
     return findings
 
 
-def check_index_matches_content(present_seq_ids: set[str], profile: dict) -> list[Finding]:
+def check_index_matches_content(
+    present_seq_ids: set[str], profile: dict
+) -> list[Finding]:
     """No preserved CAPTION index lacks corresponding captionable content (WARNING).
 
     Ruling A: the comparison keys on the DETERMINISTIC ``seq_id`` captured opaquely
@@ -389,20 +404,35 @@ def check_no_net_structure_loss(removed_refs: set[str], profile: dict) -> list[F
     """
     comp = _present_comprehension(profile)
     findings: list[Finding] = []
-    cleared_anchors = {
-        ref for ref, slot in (comp.get("cover_slots") or {}).items()
-        if isinstance(slot, dict) and slot.get("fill_rule") == schema.FillRule.CLEAR.value
-    } if comp else set()
-    cleared_indexes = {
-        idx.get("index_ref")
-        for idx in ((comp.get("conventions") or {}).get("indexes") or [])
-        if isinstance(idx, dict) and idx.get("reconcile") == schema.Reconcile.CLEAR.value
-    } if comp else set()
-    demo_regions = {
-        r.get("region_ref")
-        for r in ((comp.get("demo_classification") or {}).get("regions") or [])
-        if isinstance(r, dict) and r.get("verdict") == schema.Verdict.DEMO.value
-    } if comp else set()
+    cleared_anchors = (
+        {
+            ref
+            for ref, slot in (comp.get("cover_slots") or {}).items()
+            if isinstance(slot, dict)
+            and slot.get("fill_rule") == schema.FillRule.CLEAR.value
+        }
+        if comp
+        else set()
+    )
+    cleared_indexes = (
+        {
+            idx.get("index_ref")
+            for idx in ((comp.get("conventions") or {}).get("indexes") or [])
+            if isinstance(idx, dict)
+            and idx.get("reconcile") == schema.Reconcile.CLEAR.value
+        }
+        if comp
+        else set()
+    )
+    demo_regions = (
+        {
+            r.get("region_ref")
+            for r in ((comp.get("demo_classification") or {}).get("regions") or [])
+            if isinstance(r, dict) and r.get("verdict") == schema.Verdict.DEMO.value
+        }
+        if comp
+        else set()
+    )
     sanctioned = cleared_anchors | cleared_indexes | demo_regions
     for ref in sorted(removed_refs):
         if ref not in sanctioned:
@@ -589,7 +619,10 @@ def check_component_survival(shell, output, profile: dict) -> list[Finding]:
 def check_docx(path, profile: dict, shell=None) -> list[Finding]:
     findings = check_profile(profile)
     doc = Document(path)
-    text = "\n".join([p.text for p in doc.paragraphs] + [cell.text for t in doc.tables for row in t.rows for cell in row.cells])
+    text = "\n".join(
+        [p.text for p in doc.paragraphs]
+        + [cell.text for t in doc.tables for row in t.rows for cell in row.cells]
+    )
     for hit in textutil.find_markdown_literals(text):
         findings.append(
             Finding(
@@ -607,9 +640,20 @@ def check_docx(path, profile: dict, shell=None) -> list[Finding]:
 def check_pptx(path, profile: dict, shell=None) -> list[Finding]:
     findings = check_profile(profile)
     prs = Presentation(path)
-    text = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text"))
+    text = "\n".join(
+        shape.text
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text")
+    )
     for hit in textutil.find_markdown_literals(text):
-        findings.append(Finding("no_literal_markdown", schema.Severity.ERROR.value, f"literal markdown leaked: {hit['match']!r}"))
+        findings.append(
+            Finding(
+                "no_literal_markdown",
+                schema.Severity.ERROR.value,
+                f"literal markdown leaked: {hit['match']!r}",
+            )
+        )
     # Uniform, model-free residual check: compare against THIS template's captured
     # demo/placeholder text, never a fixed phrase (de-literalized).
     findings.extend(check_residual_template_text(text, profile))
@@ -628,7 +672,13 @@ def check_xlsx(path, profile: dict, shell=None) -> list[Finding]:
                 if isinstance(cell.value, str):
                     cell_texts.append(cell.value)
                     for hit in textutil.find_markdown_literals(cell.value):
-                        findings.append(Finding("no_literal_markdown", schema.Severity.ERROR.value, f"literal markdown leaked: {hit['match']!r}"))
+                        findings.append(
+                            Finding(
+                                "no_literal_markdown",
+                                schema.Severity.ERROR.value,
+                                f"literal markdown leaked: {hit['match']!r}",
+                            )
+                        )
     # Uniform, model-free residual check across all kinds.
     text = "\n".join(cell_texts)
     findings.extend(check_residual_template_text(text, profile))
