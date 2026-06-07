@@ -119,9 +119,16 @@ Top-level fields:
 }
 ```
 
+`pages` may be populated even when `renderers_available` is `false`: this means a
+degraded fallback image (for example a macOS Quick Look thumbnail) is available
+for inspection, not that full page-by-page render proof succeeded. Treat those
+PNGs as advisory evidence only and do not claim a clean visual audit from them.
+
 `png` paths are **relative to the `.visual` dir**. When renderers are absent the
-manifest carries `"degraded": true`, empty `pages`/`l1_findings`, but a populated
-`checklist` so you still know what would have been inspected.
+manifest carries `"degraded": true`; `pages` is populated only if an advisory
+fallback image exists, `l1_findings` still records visual failure/degradation
+signals, and the `checklist` stays populated so you know what would have been
+inspected with full render proof.
 
 ### Checklist items (derived from the profile, model-free)
 

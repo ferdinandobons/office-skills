@@ -189,7 +189,7 @@ def _run_visual_audit(
                 document=target,
                 png_paths=png_paths,
                 l1_findings=findings,
-                renderers_ok=bool(png_paths),
+                renderers_ok=False,
                 out_dir=resolved_out,
                 degraded=True,
                 environment_status=vqa.last_renderer_status(),
@@ -233,7 +233,9 @@ def _run_visual_audit(
     findings.extend(vqa.check_page_count_sane(png_paths))
 
     if qa in ("deep", "strict"):
-        manifest_renderers_ok = renderers_ok if visual is not None else bool(png_paths)
+        manifest_renderers_ok = renderers_ok if visual is not None else (
+            bool(png_paths) and not _degraded_render_warnings(render_warnings)
+        )
         ocr_report = vqa.run_visual_ocr(png_paths, profile)
         findings.extend(vqa.ocr_findings(ocr_report))
         if qa == "strict":
@@ -257,6 +259,11 @@ def _run_visual_audit(
             location=str(manifest),
         ))
     return findings
+
+
+def _degraded_render_warnings(warnings: list[str]) -> bool:
+    """Return True when PNGs came from a partial, non-PDF visual fallback."""
+    return any("Quick Look" in warning for warning in warnings)
 
 
 _STRICT_BLOCKING_CHECKS = {

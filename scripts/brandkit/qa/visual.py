@@ -894,30 +894,30 @@ def build_visual_manifest(
     The checklist is derived from the profile (see :func:`derive_visual_checklist`).
     Returns the manifest path. Deterministic JSON (indent=2, trailing newline);
     PNG paths are stored RELATIVE to ``out_dir`` for portability. When
-    ``renderers_ok`` is False the manifest carries ``"degraded": true``, empty
-    ``pages``/``l1_findings``, but a populated ``checklist`` so the orchestrator
-    still knows what it would have inspected.
+    ``renderers_ok`` means the full render pipeline produced trustworthy visual
+    proof. Degraded fallback images may still be listed in ``pages`` so the
+    orchestrator has something concrete to inspect, but the manifest remains
+    marked degraded and ``renderers_available`` stays false.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     document = Path(document)
 
     pages: list[dict] = []
-    if renderers_ok:
-        for i, png in enumerate(png_paths):
-            png = Path(png)
-            w, h = _png_dimensions(png)
-            try:
-                rel = png.relative_to(out_dir).as_posix()
-            except ValueError:
-                rel = png.name
-            pages.append({
-                "index": i + 1,
-                "png": rel,
-                "width": w,
-                "height": h,
-                "orientation": _orientation(w, h),
-            })
+    for i, png in enumerate(png_paths):
+        png = Path(png)
+        w, h = _png_dimensions(png)
+        try:
+            rel = png.relative_to(out_dir).as_posix()
+        except ValueError:
+            rel = png.name
+        pages.append({
+            "index": i + 1,
+            "png": rel,
+            "width": w,
+            "height": h,
+            "orientation": _orientation(w, h),
+        })
 
     if degraded is None:
         degraded = not renderers_ok
@@ -938,7 +938,7 @@ def build_visual_manifest(
                 "message": f.message,
                 "location": f.location,
             }
-            for f in (l1_findings if renderers_ok else [])
+            for f in l1_findings
         ],
         "ocr": ocr_report or _empty_ocr_report(profile, reason="not requested by caller"),
         "checklist": derive_visual_checklist(profile),

@@ -29,7 +29,7 @@ import os
 import shutil
 import zipfile
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 from lxml import etree
 

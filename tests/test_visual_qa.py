@@ -31,6 +31,7 @@ from brandkit.profile import schema
 from brandkit.qa import checks_deterministic
 from brandkit.qa import gate
 from brandkit.qa import visual as vqa
+from brandkit.qa.model import Finding
 
 
 def _real_docx(path: Path) -> Path:
@@ -514,6 +515,52 @@ class ManifestTest(unittest.TestCase):
             self.assertTrue(data["checklist"])  # still populated
             self.assertEqual(data["ocr"]["status"], "not_run")
 
+    def test_manifest_degraded_can_still_include_fallback_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            profile = _extract_real_profile(td)
+            out_dir = td / "out.visual"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            png = out_dir / "page-1.png"
+            _blank().save(png)
+            l1 = vqa.run_visual_l1([png])
+            manifest_path = vqa.build_visual_manifest(
+                profile=profile, document=td / "out.docx", png_paths=[png],
+                l1_findings=l1, renderers_ok=False, out_dir=out_dir,
+                degraded=True,
+            )
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertTrue(data["degraded"])
+            self.assertFalse(data["renderers_available"])
+            self.assertEqual(data["pages"][0]["png"], "page-1.png")
+            self.assertTrue(
+                any(f["check"] == "visual.blank_page" for f in data["l1_findings"])
+            )
+
+    def test_manifest_degraded_keeps_visual_findings_without_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            profile = _extract_real_profile(td)
+            out_dir = td / "out.visual"
+            manifest_path = vqa.build_visual_manifest(
+                profile=profile,
+                document=td / "out.docx",
+                png_paths=[],
+                l1_findings=[
+                    Finding(
+                        "visual.no_pages",
+                        schema.Severity.WARNING.value,
+                        "output rendered zero pages",
+                    )
+                ],
+                renderers_ok=False,
+                out_dir=out_dir,
+                degraded=True,
+            )
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["pages"], [])
+            self.assertEqual(data["l1_findings"][0]["check"], "visual.no_pages")
+
     def test_visual_ocr_flags_rendered_residual_text(self) -> None:
         orig_which = vqa.shutil.which
         orig_run = subprocess.run
@@ -706,6 +753,7 @@ class GateWiringTest(unittest.TestCase):
             self.assertEqual(len(degraded), 1)
             self.assertEqual(len(data["pages"]), 1)
             self.assertTrue(data["degraded"])
+            self.assertFalse(data["renderers_available"])
         finally:
             vqa.renderers_available = orig_available
             vqa.render_to_pngs = orig_render
@@ -768,10 +816,14 @@ class GateWiringTest(unittest.TestCase):
                 report = gate.run_qa(
                     target, _minimal_profile(), qa="deep", out_dir=out_dir,
                 )
+                manifest = [f for f in report.findings if f.check == "visual.manifest"]
+                data = json.loads(Path(manifest[0].location).read_text(encoding="utf-8"))
             degraded = [f for f in report.findings if f.check == "visual.render_degraded"]
             self.assertEqual(len(degraded), 1)
             self.assertIn("Quick Look", degraded[0].message)
             self.assertFalse(any(f.check == "visual.render_failed" for f in report.findings))
+            self.assertTrue(data["degraded"])
+            self.assertFalse(data["renderers_available"])
         finally:
             vqa.renderers_available = orig_available
             vqa.render_to_pngs = orig_render

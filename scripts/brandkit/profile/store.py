@@ -34,7 +34,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Optional, Union
 
 from brandkit.profile import schema
 
