@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.png" alt="BrandDocs — AI on-brand document generator that turns a company's Word, PowerPoint or Excel template into a reusable Brand Profile and generates unlimited on-brand .docx, .pptx and .xlsx documents" width="100%" />
+<img src="assets/hero.png" alt="BrandDocs workflow: a real Word, PowerPoint or Excel template is extracted into a reusable Brand Profile, then composed and verified into on-brand DOCX, PPTX and XLSX output" width="100%" />
 
 <br/>
 
