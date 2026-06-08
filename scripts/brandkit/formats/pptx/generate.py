@@ -834,11 +834,32 @@ def _add_native_table(slide, prs, table: ir.Table, body_placeholder=None) -> Non
         for c_idx in range(col_count):
             ppt_table.cell(0, c_idx).text = _table_header_text(table, c_idx)
         row_offset = 1
+    # Honor colspan/rowspan (parity with the docx table writer): place each logical
+    # cell at the next free grid column, merge its spanned rectangle, and mark the
+    # covered grid cells occupied so a later row's cursor skips a cell a rowspan
+    # above already claimed. Without this a banner that spans columns rendered as a
+    # full unmerged grid on pptx while docx merged it.
+    occupied: set[tuple[int, int]] = set()
     for r_idx, row in enumerate(table.rows):
-        for c_idx in range(col_count):
-            ppt_table.cell(r_idx + row_offset, c_idx).text = _table_cell_text(
-                row, c_idx
-            )
+        r = r_idx + row_offset
+        c_cursor = 0
+        for cell in row:
+            while c_cursor < col_count and (r, c_cursor) in occupied:
+                c_cursor += 1
+            if c_cursor >= col_count:
+                break
+            cspan = max(1, getattr(cell, "colspan", 1))
+            rspan = max(1, getattr(cell, "rowspan", 1))
+            end_c = min(c_cursor + cspan - 1, col_count - 1)
+            end_r = min(r + rspan - 1, row_count - 1)
+            origin = ppt_table.cell(r, c_cursor)
+            if end_c > c_cursor or end_r > r:
+                origin.merge(ppt_table.cell(end_r, end_c))
+            origin.text = textutil.runs_to_text(getattr(cell, "runs", []) or [])
+            for rr in range(r, end_r + 1):
+                for cc in range(c_cursor, end_c + 1):
+                    occupied.add((rr, cc))
+            c_cursor = end_c + 1
 
     if caption:
         cap_top = top + table_height + gap
@@ -847,9 +868,14 @@ def _add_native_table(slide, prs, table: ir.Table, body_placeholder=None) -> Non
 
 
 def _table_column_count(table: ir.Table) -> int:
-    counts = [len(table.columns)]
-    counts.extend(len(row) for row in table.rows)
-    return max(counts)
+    """Grid width = max(header cell count, span-EXPANDED body row width). Counting
+    colspan keeps the grid wide enough to merge a multi-column banner into."""
+    header = len(table.columns)
+    body = max(
+        (sum(max(1, getattr(c, "colspan", 1)) for c in row) for row in table.rows),
+        default=0,
+    )
+    return max(header, body, 0)
 
 
 def _table_header_text(table: ir.Table, index: int) -> str:
@@ -861,12 +887,6 @@ def _table_header_text(table: ir.Table, index: int) -> str:
     if isinstance(col, dict):  # a bare single run (direct construction)
         return textutil.runs_to_text([col])
     return str(col)
-
-
-def _table_cell_text(row: list, index: int) -> str:
-    if index >= len(row):
-        return ""
-    return textutil.runs_to_text(row[index].runs)
 
 
 def _table_bounds(prs, body_placeholder=None) -> tuple[int, int, int, int]:

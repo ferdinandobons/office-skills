@@ -6,6 +6,10 @@ All notable changes to BrandDocs are documented in this file.
 
 ### Added
 
+- PowerPoint tables now honor `colspan`/`rowspan`: a spanning cell (e.g. a banner
+  across columns) merges the covered grid cells in the native table, matching the
+  docx table writer. Previously pptx rendered a full ungrouped grid while docx
+  merged.
 - `smartart` blocks are now authored as a NATIVE, on-brand diagram instead of
   degrading to text - completing native rendering for every block type. On **pptx**
   the diagram is real autoshapes (a chevron row for a process/flow, a stacked

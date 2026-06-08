@@ -1933,5 +1933,49 @@ class NativeSmartArtTest(unittest.TestCase):
             )
 
 
+# ---------------------------------------------------------------------------
+# Native PPTX table cell merge (colspan/rowspan parity with the docx writer)
+# ---------------------------------------------------------------------------
+class PptxTableMergeTest(unittest.TestCase):
+    """A table cell with colspan/rowspan merges the spanned grid cells in the native
+    PowerPoint table (it used to render as a full ungrouped grid, unlike docx)."""
+
+    def test_colspan_banner_merges_cells(self):
+        idoc = {
+            "blocks": [
+                {"type": "heading", "level": 1, "runs": [{"t": "T"}]},
+                {
+                    "type": "table",
+                    "columns": ["A", "B"],
+                    "rows": [
+                        [{"runs": [{"t": "Banner"}], "colspan": 2}],
+                        [{"runs": [{"t": "x"}]}, {"runs": [{"t": "y"}]}],
+                    ],
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            template = tmp / "t.pptx"
+            _branded_template(template)
+            profile = _extract_profile(template)
+            out = tmp / "out.pptx"
+            pg.generate(profile, template, parse_idoc(idoc), out)
+            tbl = next(
+                sh.table
+                for s in Presentation(out).slides
+                for sh in s.shapes
+                if sh.has_table
+            )
+            # header row 0 (A|B); the banner is grid row 1, col 0, spanning 2 columns.
+            origin = tbl.cell(1, 0)
+            self.assertTrue(origin.is_merge_origin, "banner cell did not merge")
+            self.assertEqual(origin.span_width, 2)
+            self.assertEqual(origin.text, "Banner")
+            # the normal row below keeps two distinct cells
+            self.assertFalse(tbl.cell(2, 0).is_merge_origin)
+            self.assertEqual(tbl.cell(2, 1).text, "y")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
