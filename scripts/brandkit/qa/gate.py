@@ -76,6 +76,12 @@ def run_qa(
     elif target is not None and profile.get("kind") == "xlsx":
         findings = checks_deterministic.check_xlsx(target, profile, shell=shell)
 
+    # Format-agnostic OPC integrity backstop: a generated package with duplicate
+    # ZIP part names is corrupt (Office repair dialog). No-ops at verify time / on a
+    # missing file.
+    if target is not None:
+        findings = findings + checks_deterministic.check_no_duplicate_parts(target)
+
     # Deterministic resolver-target existence check (opens the shell once).
     findings = findings + checks_deterministic.check_resolver_targets(shell, profile)
     # Fail-closed comprehension-target membership (sibling of resolver targets):

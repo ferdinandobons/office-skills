@@ -34,6 +34,37 @@ def check_profile(profile: dict) -> list[Finding]:
     return findings
 
 
+def check_no_duplicate_parts(target) -> list[Finding]:
+    """ERROR when the output OOXML package has duplicate ZIP part names.
+
+    A valid OPC package is a ZIP whose part names are unique; a duplicate (e.g. a
+    slide-partname collision after removing a non-last slide) makes PowerPoint/Word
+    show a repair dialog. Cheap, format-agnostic integrity backstop that no
+    text/structure scan catches; a missing/garbage file is handled by other checks.
+    """
+    import zipfile
+    from collections import Counter
+
+    if target is None:
+        return []
+    try:
+        with zipfile.ZipFile(target) as z:
+            names = z.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return []
+    dups = sorted(n for n, c in Counter(names).items() if c > 1)
+    if not dups:
+        return []
+    shown = ", ".join(dups[:5]) + (" ..." if len(dups) > 5 else "")
+    return [
+        Finding(
+            check="package_integrity",
+            severity=schema.Severity.ERROR.value,
+            message=f"output package has duplicate part name(s): {shown}",
+        )
+    ]
+
+
 def check_shell_provenance(shell, profile: dict) -> list[Finding]:
     """ERROR when the saved shell no longer matches profile provenance.
 

@@ -413,6 +413,16 @@ def _clear_demo_slides(prs, comp: dict, sink: list) -> set[str]:
         prs.part.drop_rel(r_id)
         sld_id_lst.remove(sld_id)
         removed.add(ref)
+    if removed:
+        # Renumber the surviving slide parts to a CONTIGUOUS slide1..slideN sequence.
+        # python-pptx allocates a new slide's partname as ``slide{len(sldIdLst)+1}.xml``
+        # (count-based, see PresentationPart._next_slide_partname). Removing a demo
+        # slide that is NOT the highest-indexed one leaves a gap (e.g. slide10 gone,
+        # slide11 alive) so the NEXT add_slide reuses slide11.xml and collides with the
+        # live part -> a duplicate ZIP part name and a corrupt OPC package. Compacting
+        # partnames here (the same operation python-pptx uses on reorder) makes the
+        # subsequent append/agenda add_slide land on a free name.
+        prs.part.rename_slide_parts([sld_id.rId for sld_id in sld_id_lst])
     return removed
 
 

@@ -278,6 +278,70 @@ class PptxKitchenSink(_Base):
             # Deferred native writers degrade loudly, never silently.
             self.assertTrue({"kpi", "chart", "smartart", "image"} <= degraded)
 
+    def test_reconcile_path_no_duplicate_parts(self):
+        # Reconcile/comprehension path against the SHOWCASE deck: clearing a demo
+        # slide that is NOT the highest-indexed one must not leave an orphaned slide
+        # part that the next add_slide collides with (duplicate ZIP part name -> a
+        # corrupt OPC package PowerPoint would repair). Regression for the bug the
+        # deterministic-only kitchen-sink and the highest-index reconcile fixture
+        # both missed.
+        import zipfile
+        from collections import Counter
+
+        from brandkit.formats.pptx import structure as ps
+        from brandkit.profile import schema, store
+
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            loaded = self._extract(td)
+            prof = loaded.profile
+            from pptx import Presentation
+
+            demo = sorted(ps.demo_slide_indices(Presentation(loaded.shell_path)))
+            if not demo:
+                self.skipTest("example deck has no detectable demo slide")
+            block = schema.empty_comprehension()
+            block["status"] = "present"
+            block["source_shell_sha256"] = prof["provenance"]["shell"]["sha256"]
+            block["confidence"] = 0.9
+            block["demo_classification"] = {
+                "regions": [
+                    {"region_ref": f"region.slide.{demo[0]}", "verdict": "demo"}
+                ]
+            }
+            prof["comprehension"] = block
+            self.assertTrue(store.comprehension_is_present(prof))
+
+            out = td / "out.pptx"
+            sink = []
+            pptx_generate.generate(
+                prof,
+                loaded.shell_path,
+                parse_idoc(
+                    {
+                        "cover": {"title": "T"},
+                        "blocks": [
+                            {"type": "heading", "level": 1, "text": "Intro"},
+                            {"type": "paragraph", "text": "body"},
+                        ],
+                    }
+                ),
+                out,
+                findings=sink,
+            )
+            names = zipfile.ZipFile(out).namelist()
+            dups = [n for n, c in Counter(names).items() if c > 1]
+            self.assertEqual(dups, [], f"duplicate package parts: {dups}")
+            Presentation(out)  # reopens cleanly
+            report = run_qa(
+                out, prof, shell=loaded.shell_path, extra_findings=list(sink), qa="fast"
+            )
+            self.assertNotEqual(
+                report.verdict,
+                "failed",
+                [f.message for f in report.findings if f.severity == "ERROR"],
+            )
+
 
 class XlsxKitchenSink(_Base):
     KIND = "xlsx"
