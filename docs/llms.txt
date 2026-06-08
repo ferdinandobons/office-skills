@@ -19,14 +19,22 @@ Unlike generic AI document generators, BrandDocs does not freely imitate a
 template. It extracts the template's styles, layouts, named ranges, colors,
 structure, formulas, and reusable components. Generation resolves typed content
 through those extracted artifacts, and verification fails when a profile points
-to anything the template does not define.
+to anything the template does not define. Rich objects are authored natively and
+on-brand by construction: charts (Word, PowerPoint and Excel), SmartArt-style
+diagrams (Word and PowerPoint), and tables with merged cells.
+
+An optional model-driven comprehension step reads a bounded summary of the
+template and records what each structure is for, including recurring layouts the
+model proposes as reusable component/section fragments. Those proposals are
+validated fail-closed and stored in the Brand Profile so later documents reuse
+them; the model can never widen the brand guarantee.
 
 ## Supported skills
 
 - brand-docx: generate branded Word documents, reports, memos, and letters from
   a .docx template.
 - brand-pptx: generate branded PowerPoint decks from real slide masters and
-  layouts in a .pptx template.
+  layouts in a .pptx template, with native charts, diagrams and merged tables.
 - brand-xlsx: fill Excel named cells and regions while preserving formulas in
   an .xlsx template.
 

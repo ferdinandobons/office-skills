@@ -44,7 +44,7 @@
 | Skill | Format | Generates |
 |---|---|---|
 | **`brand-docx`** | Word `.docx` | reports, letters, memos, in the template's structural order |
-| **`brand-pptx`** | PowerPoint `.pptx` | decks from the template's real masters & layouts |
+| **`brand-pptx`** | PowerPoint `.pptx` | decks from the template's real masters & layouts, with native charts, diagrams & merged tables |
 | **`brand-xlsx`** | Excel `.xlsx` | workbooks: named-region fills with **formulas preserved** |
 
 All three share one engine and expose the same verbs: **`extract` → `verify` → `generate`**. Details → [documentation/SKILLS.md](documentation/SKILLS.md).
@@ -67,7 +67,7 @@ Check what's present at any time with `python scripts/brandkit/cli.py doctor`. P
 
 ## Installation
 
-The three skills share one Python engine (`scripts/brandkit/`), so install the **whole repository** — copying a single skill folder on its own won't work. After either install below, set up the [prerequisites](#prerequisites) so the engine can run, then verify with `python scripts/brandkit/cli.py doctor`.
+The three skills share one Python engine (`scripts/brandkit/`), so install the **whole repository** (copying a single skill folder on its own won't work). After either install below, set up the [prerequisites](#prerequisites) so the engine can run, then verify with `python scripts/brandkit/cli.py doctor`.
 
 ### Claude Code
 

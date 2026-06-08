@@ -12,6 +12,13 @@ All three expose the same three verbs: **`extract` → `verify` → `generate`**
 documents, never a deck or a sheet). They share one engine: a single profile
 schema, resolver, OOXML layer and QA gate underpin all three formats.
 
+An optional fourth verb, **`comprehend`**, lets the model read a bounded summary
+of the template and record what each structure is **for** before generating: cover
+slots, demo-vs-real regions, derived-index conventions, and recurring layouts it
+proposes as **reusable component/section fragments**. Every proposal is validated
+fail-closed and frozen into the Brand Profile; generation works with no
+comprehension at all (the deterministic path).
+
 ---
 
 ## Project status
@@ -27,10 +34,11 @@ are catching up.
 | Document **structure** extraction & order-aware generation | ✅ working |
 | Brand-guarantee enforcement (`verify` fails on missing artifacts) | ✅ working |
 | Deterministic QA (L0: styles, palette, residual text, tables, formula preservation, language) | ✅ working |
-| `brand-pptx`: roles from real layouts, basic generation | 🚧 early |
-| `brand-xlsx`: named-region fills, formula-preserving | 🚧 early |
+| `brand-pptx`: roles from real layouts, native charts / SmartArt / merged tables | ✅ working (fidelity still catching up to docx) |
+| `brand-xlsx`: named-region fills, formula-preserving, native charts | ✅ working (fidelity still catching up to docx) |
 | Visual QA (LibreOffice render + manifest-driven repair loop) | 🚧 implemented with graceful degraded mode |
-| Native PPTX charts / SmartArt / richer component regeneration | 🔭 catalogued, regeneration staged |
+| Native charts (DOCX / PPTX / XLSX), SmartArt diagrams (DOCX / PPTX), merged tables | ✅ working |
+| Model-driven reusable-fragment population (`comprehend` → `components` / `sections`, with `{{slot}}` substitution) | ✅ working |
 | PyMuPDF PDF raster fallback | ✅ working |
 | Optional OCR rendered-text residual scan | ✅ working when Tesseract is installed |
 | Template-based skill eval set (DOCX/PPTX/XLSX) | ✅ working in CI |

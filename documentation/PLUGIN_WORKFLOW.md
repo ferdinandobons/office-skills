@@ -79,6 +79,14 @@ flowchart TD
     MODE -->|strict + renderers unavailable| FAIL["ERROR visual.strict_unavailable"]
 ```
 
+The optional `comprehend` step (the `Need comprehension?` branch) is where the
+model records what each surfaced structure is **for**, and proposes recurring
+layouts as **reusable `component` / `section` fragments**. `comprehend` validates
+every proposal fail-closed and freezes it into the profile, so later generation
+reuses the fragments (with `{{slot}}` substitution) instead of re-deriving them.
+It is optional: an absent comprehension leaves generation on the deterministic
+path.
+
 ## Target Autonomous Repair Flow
 
 The model using the skill should treat QA and visual output as a feedback loop,
@@ -96,7 +104,7 @@ flowchart TD
 
     E --> F{"Repair target"}
     F -->|Content too large| IDOC["rewrite/split IDoc blocks"]
-    F -->|PPTX native object loss| PPTX["use native object authoring when available"]
+    F -->|PPTX native object loss| PPTX["ensure native authoring (charts, SmartArt, merged tables)"]
     F -->|Blank/overflow| COMP["adjust composition/layout/scaffold"]
     F -->|Named range too small| GRID["resize/split/truncate GridDocument with explanation"]
     F -->|Stale visible text| OCR["OCR/render-text guided cleanup"]
@@ -143,7 +151,7 @@ generated/<job>/
       "source": "qa.component_survival",
       "symptom": "native chart dropped from PPTX output",
       "likely_cause": "chart block down-rendered to text",
-      "repair": "switch to native PPTX chart authoring when available, otherwise explain the unsupported component"
+      "repair": "ensure the native PPTX chart writer is used (charts, SmartArt and merged tables are native); explain only a genuinely unsupported object"
     }
   ],
   "next_action": "regenerate"
@@ -161,7 +169,7 @@ generated/<job>/
 | Stale derived index | stale TOC/agenda/list entries | regenerate field cache/index from current headings |
 | Blank pages/slides | `visual.blank_page`, large empty render | collapse/move/remove inherited scaffold or section break |
 | Edge bleed/clipping | `visual.edge_bleed`, visual inspection | split content, reduce block density, adjust composition |
-| Native object loss | `component_survival` warning | use native object authoring when available or explain unsupported component |
+| Native object loss | `component_survival` warning | ensure the native writer is used (charts, SmartArt, merged tables); explain only a genuinely unsupported object (e.g. the docx TOC field) |
 | XLSX range overflow | named range bounds error | split data, shrink input, or ask user to expand template range |
 | Formula loss | formula preservation finding | stop and repair generator; never ship silently |
 
