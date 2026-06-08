@@ -67,7 +67,15 @@ python scripts/brandkit/cli.py doctor
 ```
 
 `doctor` lists each dependency (present or missing) and prints the exact install
-command for anything missing: it never fails the run.
+command for anything missing. It is a preflight gate: it exits non-zero if any
+*required* Python package is missing, and exits zero when all required packages are
+present (missing optional renderers/OCR only downgrade visual QA, they never fail
+the run). Two flags refine it:
+
+```bash
+python scripts/brandkit/cli.py doctor --json   # machine-readable probe dict; skips the human report
+python scripts/brandkit/cli.py doctor --fast   # skip the slow LibreOffice render smoke-test; marks visual QA "not probed"
+```
 
 ---
 
