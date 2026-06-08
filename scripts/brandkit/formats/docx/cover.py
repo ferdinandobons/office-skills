@@ -501,9 +501,7 @@ def _compose_cover_deterministic(
     return set()
 
 
-def _fill_cover_title_deterministic(
-    doc, profile: dict, title: str, sink: list
-) -> None:
+def _fill_cover_title_deterministic(doc, profile: dict, title: str, sink: list) -> None:
     """Place the cover title IN PLACE: a title SDT, then a ``{{title}}``/"Insert
     title" placeholder paragraph, then (last resort) a new title paragraph moved
     before the first toc/body child. Unchanged behavior, extracted so the subtitle

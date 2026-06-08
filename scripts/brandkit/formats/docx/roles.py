@@ -217,9 +217,9 @@ def infer_roles(doc) -> dict:
     # template whose subtitle is a databound SDT, or none) the subtitle is surfaced
     # as unplaced and the comprehension path fills the full multi-slot cover.
     custom_paragraph_styles = [s for s in paragraph_styles if _is_custom_style(s)]
-    subtitle = _best_name_token_style(custom_paragraph_styles, "subtitle") or _find_style(
-        paragraph_styles, "Subtitle"
-    )
+    subtitle = _best_name_token_style(
+        custom_paragraph_styles, "subtitle"
+    ) or _find_style(paragraph_styles, "Subtitle")
     if subtitle is not None:
         add(
             "cover.subtitle",
