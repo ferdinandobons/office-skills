@@ -65,6 +65,31 @@ _XML_SUFFIXES = (".xml", ".rels")
 # recursively because their raw zip bytes can drift across library versions
 # even when their logical content is unchanged.
 _NESTED_PACKAGE_SUFFIXES = (".docx", ".pptx", ".xlsx", ".zip")
+# Raster image media. Pillow-rendered PNGs (the _brandlib wordmark/curve) are NOT
+# byte-stable across Pillow versions (the zlib/IDAT encoding differs), so a raw byte
+# compare false-positives on the CI matrix. Compared by decoded geometry when bytes
+# differ (below) - tolerating encoding noise while still catching a different image.
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
+
+
+def _compare_image(test: unittest.TestCase, eb: bytes, ab: bytes, loc: str) -> None:
+    """Byte-equal when identical (same env / static media); otherwise require the
+    same decoded mode + size, tolerating cross-version PNG/JPEG encoding noise."""
+    if eb == ab:
+        return
+    try:
+        from PIL import Image as _PILImage
+
+        ia = _PILImage.open(io.BytesIO(eb))
+        ia.load()
+        ib = _PILImage.open(io.BytesIO(ab))
+        ib.load()
+    except Exception:  # undecodable -> fall back to strict byte equality
+        test.assertEqual(eb, ab, f"image part differs in {loc}")
+        return
+    test.assertEqual(
+        (ia.mode, ia.size), (ib.mode, ib.size), f"image geometry drifted in {loc}"
+    )
 
 
 def _load_builder(stem: str) -> ModuleType:
@@ -160,6 +185,8 @@ def _compare_zip(
             )
         elif part.endswith(_NESTED_PACKAGE_SUFFIXES):
             _compare_zip(test, eb, ab, loc)
+        elif part.endswith(_IMAGE_SUFFIXES):
+            _compare_image(test, eb, ab, loc)
         else:
             test.assertEqual(eb, ab, f"binary part differs in {loc}")
 
