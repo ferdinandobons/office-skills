@@ -8,7 +8,9 @@ from typing import Optional
 
 from docx import Document
 from docx.opc.constants import RELATIONSHIP_TYPE
-from docx.oxml import OxmlElement
+from docx.opc.packuri import PackURI
+from docx.opc.part import Part
+from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn
 from docx.shared import Emu
 
@@ -17,6 +19,7 @@ from brandkit.formats.docx import cover, structure
 from brandkit.formats.docx.styles import lookup_style
 from brandkit.ir import components
 from brandkit.ir import model as ir
+from brandkit.ooxml import chart as chartlib
 from brandkit.ooxml.idempotency import repack_fixed_timestamps
 from brandkit.profile import schema, store
 from brandkit.profile.reconcile import confidence_clears_floor
@@ -33,7 +36,7 @@ from brandkit.qa.model import Finding
 # no-op in the body (the live TOC field is refreshed separately by ``refresh_toc``)
 # so it is degraded as INFO, not WARNING.
 _UNHANDLED_BLOCK_TYPES: frozenset[str] = frozenset(
-    {"chart", "smartart", "component", "section", "toc"}
+    {"smartart", "component", "section", "toc"}
 )
 
 
@@ -386,6 +389,8 @@ def _write_block(
         _write_image(doc, resolver, block, findings)
     elif isinstance(block, ir.Kpi):
         _write_kpi(doc, resolver, block, findings)
+    elif isinstance(block, ir.Chart):
+        _write_chart(doc, block, findings)
     elif block.TYPE in _UNHANDLED_BLOCK_TYPES:
         # No writer for this block in the M1 docx vertical. Skip cleanly - NEVER
         # emit a blank ``Normal`` paragraph - and record a degradation finding so
@@ -483,6 +488,111 @@ def _write_image(doc, resolver, block, findings) -> None:
     if block.caption:
         para = _para_with_runs(doc, block.caption)
         _apply_resolved_style(doc, para, resolver.resolve_role("caption"), findings)
+
+
+_CHART_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+)
+_CHART_REL_TYPE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
+)
+_NS_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+_NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _write_chart(doc, block, findings) -> None:
+    """Author an ``ir.Chart`` as a NATIVE Word chart (a real DrawingML
+    ``c:chartSpace`` part referenced by an inline ``w:drawing``), not flattened to
+    text. The chart carries INLINE cached data (no embedded workbook), so it stays
+    byte-idempotent, and writes no literal colors, so it inherits the document
+    theme's accent colors (on-brand by construction). An unknown ``chart_type``
+    falls back to a clustered column chart (surfaced as INFO); an empty/all-non-
+    numeric chart degrades to a loud ``block_degraded`` WARNING - never a crash or a
+    silent drop. ``title`` is authoritative when present.
+    """
+    if not chartlib.has_plottable_data(block):
+        findings.append(
+            Finding(
+                "block_degraded",
+                schema.Severity.WARNING.value,
+                "'chart' block had no plottable numeric data; skipped",
+            )
+        )
+        return
+    if not chartlib.is_known_chart_type(block.chart_type):
+        findings.append(
+            Finding(
+                "chart_type_fallback",
+                schema.Severity.INFO.value,
+                f"chart_type {block.chart_type!r} unknown; "
+                "rendered as a clustered column chart",
+            )
+        )
+
+    series = chartlib.coerce_series(block)
+    if chartlib.is_single_series_type(block.chart_type) and len(series) > 1:
+        findings.append(
+            Finding(
+                "chart_series_truncated",
+                schema.Severity.WARNING.value,
+                f"a {block.chart_type!r} chart renders only the first of "
+                f"{len(series)} series; the others are not shown",
+            )
+        )
+    xml = chartlib.build_chart_xml(
+        block.chart_type, series, block.categories, block.title
+    )
+
+    # New chart part with a STABLE partname (derived from the count of existing
+    # chart parts, so a re-run produces the same name) + the relationship from the
+    # document part. python-docx auto-registers the content-type override at save.
+    existing = sum(
+        1
+        for p in doc.part.package.iter_parts()
+        if str(p.partname).startswith("/word/charts/chart")
+    )
+    partname = PackURI(f"/word/charts/chart{existing + 1}.xml")
+    part = Part(partname, _CHART_CONTENT_TYPE, xml, doc.part.package)
+    r_id = doc.part.relate_to(part, _CHART_REL_TYPE)
+
+    # ``wp:docPr@id`` must be UNIQUE across every drawing object in the document
+    # (images use python-docx's global max+1; a chart-only counter would collide
+    # with an image's id and make Word refuse the file). Derive the next id from the
+    # max of all existing ``wp:docPr`` ids - deterministic given the fixed
+    # generation order, so byte-idempotency holds.
+    doc_pr_ids = [
+        int(el.get("id"))
+        for el in doc.element.iter(qn("wp:docPr"))
+        if (el.get("id") or "").isdigit()
+    ]
+    doc_pr_id = max(doc_pr_ids, default=0) + 1
+
+    # Inline drawing sized to the section content width with a 3:2 aspect (matches
+    # the image writer's layout-driven sizing; no fabricated coordinate). The
+    # ``c:chart`` graphicData references the chart part by rId. The drawing goes into
+    # a run of a paragraph added via ``add_paragraph`` so it lands BEFORE the body's
+    # final ``w:sectPr`` (appending to the body directly would place it after, which
+    # is invalid).
+    sec = doc.sections[-1]
+    cx = int(sec.page_width - sec.left_margin - sec.right_margin)
+    cy = int(cx * 2 / 3)
+    drawing = (
+        f'<w:drawing xmlns:w="{_NS_W}" xmlns:wp="{_NS_WP}" xmlns:a="{_NS_A}" '
+        f'xmlns:r="{_NS_R}" xmlns:c="{_NS_CHART}">'
+        f'<wp:inline distT="0" distB="0" distL="0" distR="0">'
+        f'<wp:extent cx="{cx}" cy="{cy}"/>'
+        f'<wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        f'<wp:docPr id="{doc_pr_id}" name="Chart {existing + 1}"/>'
+        f"<wp:cNvGraphicFramePr/>"
+        f'<a:graphic><a:graphicData uri="{_NS_CHART}">'
+        f'<c:chart r:id="{r_id}"/>'
+        f"</a:graphicData></a:graphic></wp:inline></w:drawing>"
+    )
+    run = doc.add_paragraph().add_run()
+    run._r.append(parse_xml(drawing))
 
 
 def _write_list_items(doc, resolver, block, items, findings) -> None:

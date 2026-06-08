@@ -66,6 +66,7 @@ from brandkit.common import text as textutil
 from brandkit.formats.pptx import structure
 from brandkit.ir import components
 from brandkit.ir import model as ir
+from brandkit.ooxml import chart as chartlib
 from brandkit.ooxml.idempotency import repack_fixed_timestamps
 from brandkit.profile import schema, store
 from brandkit.profile.reconcile import confidence_clears_floor
@@ -592,7 +593,7 @@ def _content_chunks(blocks: list, capacity: int, sink: list) -> list[SlideChunk]
             # Chart -> a real PowerPoint chart shape (native graphicFrame/c:chart),
             # inheriting the deck theme's accent colors (on-brand by construction).
             flush_pending()
-            if _chart_has_data(block):
+            if chartlib.has_plottable_data(block):
                 chunks.append(SlideChunk(lines=[], chart=block))
             else:
                 _degrade(sink, "chart", note="had no series/categories; skipped")
@@ -662,52 +663,6 @@ _CHART_TYPE_MAP = {
 }
 
 
-# Single-series chart families: PowerPoint renders only the FIRST series for these
-# (a pie/doughnut has no second-series slot), so authoring more than one is data
-# loss - surfaced as a WARNING rather than silently hidden.
-_SINGLE_SERIES_TYPES = frozenset({XL_CHART_TYPE.PIE, XL_CHART_TYPE.DOUGHNUT})
-
-
-def _as_chart_number(value):
-    """Coerce a series value to float; a non-numeric value becomes a gap (None),
-    never a crash - the chart still renders the points it can plot."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerced_series(chart: ir.Chart) -> list[tuple[str, tuple]]:
-    """Return ``(name, values)`` for each series with at least one PLOTTABLE value.
-
-    Values are coerced to float (a non-numeric value becomes a gap ``None``). A
-    series whose values are ALL non-numeric coerces to all-``None`` - nothing to
-    plot - and is dropped here so the chart never renders a phantom empty series
-    that looks like data (it is just absent). This is the single source of truth
-    both ``_chart_has_data`` (the gate) and ``_add_native_chart`` (the writer) use,
-    so the gate and the render can never disagree."""
-    out: list[tuple[str, tuple]] = []
-    for series in chart.series or []:
-        if not isinstance(series, dict):
-            continue
-        values = series.get("values")
-        if not values:
-            continue
-        nums = tuple(_as_chart_number(v) for v in values)
-        if not any(v is not None for v in nums):
-            continue
-        out.append((str(series.get("name") or ""), nums))
-    return out
-
-
-def _chart_has_data(chart: ir.Chart) -> bool:
-    """True when the chart has a category axis AND at least one series with a
-    plottable numeric value - exactly what ``_add_native_chart`` can render. An
-    empty (or all-non-numeric) chart degrades loudly upstream rather than producing
-    a blank chart shape."""
-    return bool(chart.categories) and bool(_coerced_series(chart))
-
-
 def _add_native_chart(slide, prs, chart: ir.Chart, body_placeholder, sink) -> None:
     """Author an ``ir.Chart`` as a REAL PowerPoint chart (a ``graphicFrame``/
     ``c:chart`` via python-pptx ``add_chart``), sized to the body placeholder.
@@ -718,6 +673,8 @@ def _add_native_chart(slide, prs, chart: ir.Chart, body_placeholder, sink) -> No
     a build failure degrades to a loud ``block_degraded`` WARNING, never a crash or
     a silent drop. The embedded data workbook python-pptx creates is timestamp-
     normalized by ``repack_fixed_timestamps`` so generation stays byte-idempotent.
+    Series coercion / single-series-truncation are the SHARED ``ooxml.chart`` gates
+    (the docx vertical uses the same), so both formats agree on what is plottable.
     """
     chart_type = _CHART_TYPE_MAP.get((chart.chart_type or "bar").lower())
     if chart_type is None:
@@ -731,13 +688,13 @@ def _add_native_chart(slide, prs, chart: ir.Chart, body_placeholder, sink) -> No
             )
         )
 
-    plottable = _coerced_series(chart)
+    plottable = chartlib.coerce_series(chart)
     if not plottable:
         _degrade(sink, "chart", note="had no usable numeric series; skipped")
         return
     # A pie/doughnut shows only its first series; surface the dropped ones rather
     # than hiding them silently (the chart is still authored from the first series).
-    if chart_type in _SINGLE_SERIES_TYPES and len(plottable) > 1:
+    if chartlib.is_single_series_type(chart.chart_type) and len(plottable) > 1:
         sink.append(
             Finding(
                 "chart_series_truncated",

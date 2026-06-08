@@ -443,7 +443,7 @@ class UnhandledBlockTest(unittest.TestCase):
                     ir.Image(
                         src="/nope.png"
                     ),  # missing source -> degrades, never crashes
-                    ir.Chart(),  # no native docx chart writer yet -> degrades
+                    ir.Chart(),  # empty chart (no data) -> degrades loudly, no blank para
                 ]
             )
             before = len(Document(shell).paragraphs)
@@ -491,6 +491,223 @@ class UnhandledBlockTest(unittest.TestCase):
             toc_findings = [f for f in findings if f.check == "block_degraded"]
             self.assertEqual(len(toc_findings), 1)
             self.assertEqual(toc_findings[0].severity, schema.Severity.INFO.value)
+
+
+# ---------------------------------------------------------------------------
+# Native docx charts (ir.Chart -> a DrawingML c:chartSpace part, inline data)
+# ---------------------------------------------------------------------------
+class NativeDocxChartTest(unittest.TestCase):
+    """A Chart block is authored as a REAL Word chart (a c:chartSpace part an inline
+    w:drawing references), not flattened to text: valid part, inline cached data (NO
+    embedded workbook), theme-colored, byte-idempotent, unknown-type fallback, empty
+    degrades, pie truncation surfaced."""
+
+    def _shell(self, tmp_path):
+        shell = tmp_path / "shell.docx"
+        d = Document()
+        d.add_paragraph("x", style="Heading 1")
+        d.save(shell)
+        return shell
+
+    def _chart_parts(self, path):
+        import zipfile
+
+        with zipfile.ZipFile(path) as z:
+            return {
+                n: z.read(n).decode("utf-8")
+                for n in z.namelist()
+                if n.startswith("word/charts/chart") and n.endswith(".xml")
+            }
+
+    def _gen(self, td, idoc, *, sink=None):
+        shell = self._shell(td)
+        out = td / "out.docx"
+        docx_generate.generate(
+            _docx_profile({"_index": []}), shell, idoc, out, findings=sink
+        )
+        return out
+
+    def test_chart_blocks_become_native_chart_parts(self):
+        import tempfile
+        import zipfile
+
+        idoc = ir.IntermediateDocument(
+            blocks=[
+                ir.Heading(level=1, runs=[{"t": "Ricavi"}]),
+                ir.Chart(
+                    chart_type="bar",
+                    title="Ricavi",
+                    categories=["Q1", "Q2", "Q3"],
+                    series=[
+                        {"name": "A", "values": [1, 2, 3]},
+                        {"name": "B", "values": [3, 2, 1]},
+                    ],
+                ),
+                ir.Chart(
+                    chart_type="pie",
+                    title="Quota",
+                    categories=["X", "Y"],
+                    series=[{"name": "S", "values": [60, 40]}],
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            sink: list[Finding] = []
+            out = self._gen(td, idoc, sink=sink)
+            parts = self._chart_parts(out)
+            self.assertEqual(len(parts), 2, "two native chart parts expected")
+            joined = "".join(parts.values())
+            for xml in parts.values():
+                self.assertIn("<c:chartSpace", xml)
+            self.assertIn("<c:barChart", joined)
+            self.assertIn("<c:pieChart", joined)
+            self.assertIn("<c:numCache", joined)  # data cached INLINE
+            self.assertIn("<c:v>3</c:v>", joined)  # a series value round-tripped
+            # The inline-data chart embeds NO workbook (that is what keeps it
+            # deterministic) and the body references the chart part via a drawing.
+            with zipfile.ZipFile(out) as z:
+                self.assertFalse(
+                    [n for n in z.namelist() if "embeddings" in n],
+                    "inline-data chart must not embed a workbook",
+                )
+                body = z.read("word/document.xml").decode("utf-8")
+            self.assertIn("c:chart", body)
+            self.assertFalse(
+                any(f.check == "block_degraded" and "chart" in f.message for f in sink)
+            )
+
+    def test_chart_is_byte_idempotent(self):
+        import tempfile
+
+        idoc = ir.IntermediateDocument(
+            blocks=[
+                ir.Chart(
+                    chart_type="bar",
+                    categories=["Q1", "Q2"],
+                    series=[{"name": "A", "values": [1, 2]}],
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            shell = self._shell(td)
+            a, b = td / "a.docx", td / "b.docx"
+            docx_generate.generate(_docx_profile({"_index": []}), shell, idoc, a)
+            docx_generate.generate(_docx_profile({"_index": []}), shell, idoc, b)
+            self.assertEqual(
+                a.read_bytes(), b.read_bytes(), "native-chart docx not byte-idempotent"
+            )
+
+    def test_unknown_type_falls_back_and_empty_degrades(self):
+        import tempfile
+
+        idoc = ir.IntermediateDocument(
+            blocks=[
+                ir.Chart(
+                    chart_type="nonsense",
+                    categories=["A", "B"],
+                    series=[{"name": "S", "values": [1, 2]}],
+                ),
+                ir.Chart(chart_type="bar", categories=[], series=[]),  # empty
+            ]
+        )
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            sink: list[Finding] = []
+            out = self._gen(td, idoc, sink=sink)
+            # the unknown type still produces ONE native chart part (fallback)...
+            self.assertEqual(len(self._chart_parts(out)), 1)
+            self.assertTrue(any(f.check == "chart_type_fallback" for f in sink))
+            # ...and the empty chart degrades loudly (never a silent drop).
+            self.assertTrue(
+                any(f.check == "block_degraded" and "chart" in f.message for f in sink)
+            )
+
+    def test_multi_series_pie_warns(self):
+        import tempfile
+
+        idoc = ir.IntermediateDocument(
+            blocks=[
+                ir.Chart(
+                    chart_type="pie",
+                    categories=["A", "B"],
+                    series=[
+                        {"name": "First", "values": [1, 2]},
+                        {"name": "Second", "values": [3, 4]},
+                    ],
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            sink: list[Finding] = []
+            self._gen(td, idoc, sink=sink)
+            self.assertTrue(any(f.check == "chart_series_truncated" for f in sink))
+
+    def test_docpr_ids_unique_across_image_and_chart(self):
+        # An image and a chart in the same document must get DISTINCT wp:docPr ids
+        # (a chart-only counter used to collide with the image's id -> Word rejects).
+        import tempfile
+
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            png = td / "fig.png"
+            PILImage.new("RGB", (32, 16), (20, 40, 80)).save(png)
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Image(src=str(png)),
+                    ir.Chart(
+                        chart_type="bar",
+                        categories=["A", "B"],
+                        series=[{"name": "S", "values": [1, 2]}],
+                    ),
+                ]
+            )
+            out = self._gen(td, idoc)
+            doc = Document(out)
+            ids = [
+                el.get("id")
+                for el in doc.element.iter(qn("wp:docPr"))
+                if el.get("id") is not None
+            ]
+            self.assertGreaterEqual(len(ids), 2, "expected an image + a chart docPr")
+            self.assertEqual(len(ids), len(set(ids)), f"duplicate wp:docPr ids: {ids}")
+
+    def test_non_finite_and_ragged_values_are_safe(self):
+        # inf/nan must not crash (int(inf) would); a series shorter than the category
+        # axis must be padded so the value ptCount matches the categories (else Word
+        # drops the trailing ones). The chart still generates with no crash.
+        import tempfile
+
+        idoc = ir.IntermediateDocument(
+            blocks=[
+                ir.Chart(
+                    chart_type="bar",
+                    categories=["A", "B", "C", "D"],
+                    series=[{"name": "S", "values": [10, float("inf"), 12]}],  # ragged
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            sink: list[Finding] = []
+            out = self._gen(td, idoc, sink=sink)
+            parts = self._chart_parts(out)
+            self.assertEqual(len(parts), 1)
+            xml = next(iter(parts.values()))
+            # value ptCount matches the 4 categories (short series padded to 4)...
+            self.assertIn(
+                '<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="4"/>',
+                xml,
+            )
+            # ...inf was dropped (rendered as a gap, not "inf"/crash).
+            self.assertNotIn("inf", xml.lower())
+            self.assertFalse(
+                any(f.check == "block_degraded" and "chart" in f.message for f in sink)
+            )
 
 
 # ---------------------------------------------------------------------------

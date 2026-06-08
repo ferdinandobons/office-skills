@@ -171,6 +171,7 @@ def _capabilities() -> dict:
         "extracts_layout_geometry": True,
         "generates_from_shell": True,
         "visual_overflow_requires_render": True,
+        "native_charts": True,
     }
 
 

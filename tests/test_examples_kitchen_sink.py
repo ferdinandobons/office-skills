@@ -227,17 +227,19 @@ class DocxKitchenSink(_Base):
             body_xml = ET.tostring(doc.element.body).decode().lower()
             self.assertIn("hyperlink", body_xml, "hyperlink lost")
             # Divider is native (a paragraph border), image is native (a:blip drawing),
-            # KPI is native (a brand table) - none should be a degraded warning.
+            # KPI is native (a brand table), chart is native (a c:chart part) - none
+            # should be a degraded warning.
             self.assertIn("pbdr", body_xml, "native divider rule missing")
             self.assertIn("a:blip", body_xml, "native image not placed")
+            self.assertIn("c:chart", body_xml, "native chart drawing not placed")
             degraded = _degraded_kinds(sink)
             self.assertEqual(
-                degraded & {"divider", "image", "kpi"},
+                degraded & {"divider", "image", "kpi", "chart"},
                 set(),
                 f"these should be native now: {degraded}",
             )
             # Genuinely-deferred native writers still degrade loudly (never silently).
-            self.assertTrue({"chart", "smartart"} <= degraded)
+            self.assertTrue({"smartart"} <= degraded)
             # Output fidelity on the SHOWCASE profile (different brand style names than
             # the synthetic fixture): lists carry real numbering and the table carries
             # the brand table style, so role nomination is exercised end-to-end.

@@ -6,15 +6,18 @@ All notable changes to BrandDocs are documented in this file.
 
 ### Added
 
-- PowerPoint: a `chart` block is now authored as a **native PowerPoint chart**
-  (a real `graphicFrame`/`c:chart` via python-pptx), no longer flattened to body
-  text. `bar`/`column`/`line`/`area`/`pie`/`doughnut` map to the matching chart
-  type (unknown -> clustered column, surfaced as INFO); series/categories/title
-  come from the block, and the chart inherits the deck theme's accent colors so it
-  is on-brand by construction. Generation stays byte-idempotent: the data workbook
-  python-pptx embeds carries wall-clock timestamps, so `repack_fixed_timestamps`
-  now normalizes nested OOXML packages recursively. docx/xlsx native chart writers
-  remain deferred (those blocks still degrade loudly).
+- A `chart` block is now authored as a **native chart on both Word and PowerPoint**
+  (a real DrawingML `c:chart`: an inline `w:drawing` on docx, a `graphicFrame` on
+  pptx), no longer flattened to body text. `bar`/`column`/`barh`/`line`/`area`/`pie`/
+  `doughnut` map to the matching chart type (unknown -> clustered column, surfaced as
+  INFO); series/categories/title come from the block, and the chart inherits the
+  document/deck theme's accent colors so it is on-brand by construction. A
+  multi-series pie/doughnut surfaces a truncation WARNING; an empty/all-non-numeric
+  chart degrades loudly. A shared `ooxml.chart` builds the docx chart with INLINE
+  cached data (no embedded workbook) and is the single data gate both formats use;
+  the pptx data workbook's wall-clock timestamps are normalized by
+  `repack_fixed_timestamps` (now recursive over nested OOXML packages), so generation
+  stays byte-idempotent on both. The xlsx native chart writer remains deferred.
 - Word: the deterministic cover fill (comprehension absent) now also places
   the authored **subtitle** into the cover slot identified by its resolved
   `cover.subtitle` style - correct-by-style, never guessed from the template's
