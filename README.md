@@ -43,7 +43,7 @@
 
 | Skill | Format | Generates |
 |---|---|---|
-| **`brand-docx`** | Word `.docx` | reports, letters, memos, in the template's structural order |
+| **`brand-docx`** | Word `.docx` | reports, letters and memos in the template's structural order |
 | **`brand-pptx`** | PowerPoint `.pptx` | decks from the template's real masters & layouts, with native charts, diagrams & merged tables |
 | **`brand-xlsx`** | Excel `.xlsx` | workbooks: named-region fills with **formulas preserved** and brand number formats |
 
@@ -63,7 +63,7 @@ BrandDocs runs locally and needs a few things installed **before first use**:
   ```bash
   bash scripts/setup_visual_qa.sh
   ```
-  Generation still runs without them (it degrades gracefully to L0), but install them so the visual gate stays on.
+  Generation still runs without them (it degrades gracefully to deterministic-only QA, level L0), but install them so the visual gate stays on.
 
 Check what's present at any time with `python scripts/brandkit/cli.py doctor`. Per-OS commands and the full setup → **[documentation/INSTALLATION.md](documentation/INSTALLATION.md)**.
 
@@ -110,7 +110,7 @@ The agent activates `brand-docx`, extracts (or reuses) a Brand Profile, fills th
 **Direct CLI** (the engine, for tests & debugging):
 
 ```bash
-# 1) Extract the brand from a template into a reusable kit
+# 1) Extract the brand from a template into a reusable Brand Profile
 python scripts/brandkit/cli.py extract --name <your_company> --template template.docx --scope project
 
 # 2) Verify the profile (fails if a role points at a missing artifact)

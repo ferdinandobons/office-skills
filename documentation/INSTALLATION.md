@@ -33,7 +33,7 @@ The **visual QA gate is a core part of the QA step** and runs by default wheneve
 its tools are present: it renders the output and catches layout problems the
 deterministic checks can't (text overflow, blank pages, clipping, stale demo text)
 which in Word only surface at render time. Generation still runs without them (the
-engine degrades gracefully to L0), but **install them so the visual gate stays
+engine degrades gracefully to deterministic-only QA, level L0), but **install them so the visual gate stays
 on** - it is treated as fundamental, not optional.
 
 Simplest path - one command auto-detects your package manager and installs them:

@@ -5,9 +5,9 @@ Claude Code, AI agent, document-generation, and open-source tool directories.
 
 ## One-line pitch
 
-BrandDocs turns existing Word, PowerPoint and Excel templates into reusable AI
-document-generation skills for Claude Code and Codex, generating faithful
-on-brand `.docx`, `.pptx` and `.xlsx` files from the original template shell.
+BrandDocs is a set of Claude Code and Codex agent skills that learn your existing
+Word, PowerPoint and Excel templates and generate faithful on-brand `.docx`,
+`.pptx` and `.xlsx` files from the original template shell.
 
 ## Short listing copy
 
@@ -64,9 +64,8 @@ Suggested entry:
 
 ```markdown
 - [BrandDocs](https://github.com/ferdinandobons/brand-docs) - Claude Code and
-  Codex skill bundle that turns Word, PowerPoint and Excel templates into
-  reusable AI document-generation skills for faithful `.docx`, `.pptx` and
-  `.xlsx` output.
+  Codex skill bundle that learns your Word, PowerPoint and Excel templates and
+  generates faithful on-brand `.docx`, `.pptx` and `.xlsx` output.
 ```
 
 Good targets:
