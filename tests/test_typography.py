@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: MIT
-"""Regression tests for brand typography capture (font family).
+"""Regression tests for brand typography capture (font family, size, and color).
 
-Covers the four layers of the feature:
-  - capture: the dominant direct run font is recorded into theme.fonts.body and
-    per-role appearance, and a no-dominant document captures nothing;
-  - resolver: a role's own captured font wins; otherwise the document body font
-    fills in (including for a missing-role stub);
-  - apply: generated runs get the captured font as direct formatting, and a
-    profile with NO captured typography leaves runs unfonted (no regression);
-  - verify: a font the shell does not carry is an ERROR, a shell font is accepted,
-    and an empty-appearance profile produces no finding.
+Covers the four layers across all three INDEPENDENT axes (font / size / color):
+  - capture: the dominant direct run font/size/color is recorded into the document
+    defaults (theme.fonts.body for font/size, theme.text.body for color) and per-role
+    appearance, each axis independently; a no-dominant document captures nothing;
+  - resolver: a role's own captured value wins per axis; otherwise the document body
+    value fills in (font for every role, but size/color ONLY for the paragraph/body
+    family, never a heading), including for a missing-role stub;
+  - apply: generated runs get the captured value as direct formatting via three
+    independent per-axis guards; a profile with NO captured typography leaves runs
+    unsized/uncolored/unfonted (no regression); re-runs stay byte-identical;
+  - verify: a size/color/font the shell does not prove it contains is an ERROR, a
+    shell-backed value is accepted, and an empty-appearance profile produces no
+    finding.
 """
 
 from __future__ import annotations
@@ -17,18 +21,28 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from docx import Document
+from docx.enum.dml import MSO_COLOR_TYPE, MSO_THEME_COLOR
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 
+from brandkit.common import text as textutil
+from brandkit.formats.docx import extract as docx_extract
 from brandkit.formats.docx import generate as docx_generate
 from brandkit.formats.docx import typography
 from brandkit.ir import model as ir
 from brandkit.profile import schema
 from brandkit.profile.resolver import ProfileResolver
 from brandkit.qa import checks_deterministic
+
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _profile(theme=None, roles=None):
@@ -40,11 +54,19 @@ def _profile(theme=None, roles=None):
     return prof
 
 
-def _shell(tmp_path, *, heading=True):
+def _shell(tmp_path, *, heading=True, size_hp=None, hex_color=None):
     shell = tmp_path / "shell.docx"
     d = Document()
     if heading:
         d.add_paragraph("x", style="Heading 1")
+    # Seed run-level provenance the size/color verifier reads from document.xml: an
+    # explicit w:sz and/or an explicit w:color on a real run.
+    if size_hp is not None or hex_color is not None:
+        run = d.add_paragraph().add_run("provenance")
+        if size_hp is not None:
+            run.font.size = Pt(size_hp / 2)
+        if hex_color is not None:
+            run.font.color.rgb = RGBColor.from_string(hex_color)
     d.save(shell)
     return shell
 
@@ -200,6 +222,88 @@ class ApplyTest(unittest.TestCase):
             fonts = {r.font.name for p in Document(out).paragraphs for r in p.runs}
             self.assertEqual(fonts, {None})
 
+    def test_body_font_applied_to_table_cell_runs(self):
+        # Dimension 4: a table cell paragraph carries no python-docx style, so its
+        # runs are branded by the table writer from the resolved table.default op
+        # (which falls back to the document body font).
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={"colors": {}, "fonts": {"body": {"latin": "Roboto"}}}
+            )
+            table = ir.Table(
+                columns=[],
+                rows=[[ir.TableCell(runs=[{"t": "cell text"}])]],
+                role="default",
+            )
+            idoc = ir.IntermediateDocument(blocks=[table])
+            docx_generate.generate(prof, shell, idoc, out)
+            cell_fonts = {
+                r.font.name
+                for t in Document(out).tables
+                for row in t.rows
+                for c in row.cells
+                for p in c.paragraphs
+                for r in p.runs
+            }
+            self.assertIn("Roboto", cell_fonts)
+
+    def test_no_typography_leaves_table_cell_runs_unfonted(self):
+        # Regression: with no captured typography, table cell runs stay unfonted.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(theme={"colors": {}, "fonts": {}})
+            table = ir.Table(
+                columns=[],
+                rows=[[ir.TableCell(runs=[{"t": "cell text"}])]],
+                role="default",
+            )
+            idoc = ir.IntermediateDocument(blocks=[table])
+            docx_generate.generate(prof, shell, idoc, out)
+            cell_fonts = {
+                r.font.name
+                for t in Document(out).tables
+                for row in t.rows
+                for c in row.cells
+                for p in c.paragraphs
+                for r in p.runs
+            }
+            self.assertEqual(cell_fonts, {None})
+
+    def test_table_cell_hyperlink_run_carries_brand_font(self):
+        # A hyperlink run is raw w:r XML (not a python-docx Run), so _apply_appearance
+        # cannot reach it; the writer injects w:rFonts (ascii+hAnsi only, no cs) from
+        # the resolved op so even link text in a cell carries the brand typeface.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={"colors": {}, "fonts": {"body": {"latin": "Roboto"}}}
+            )
+            cell = ir.TableCell(runs=[{"t": "site", "link": "https://example.com"}])
+            table = ir.Table(columns=[], rows=[[cell]], role="default")
+            idoc = ir.IntermediateDocument(blocks=[table])
+            docx_generate.generate(prof, shell, idoc, out)
+            doc = Document(out)
+            cell_xml = doc.tables[0].rows[0].cells[0]._tc.xml
+            self.assertIn("w:hyperlink", cell_xml)
+            # The rFonts on the link run names the brand font on ascii + hAnsi only.
+            rfonts = (
+                doc.tables[0]
+                .rows[0]
+                .cells[0]
+                ._tc.findall(
+                    f".//{{{_W_NS}}}hyperlink/{{{_W_NS}}}r/"
+                    f"{{{_W_NS}}}rPr/{{{_W_NS}}}rFonts"
+                )
+            )
+            self.assertEqual(len(rfonts), 1)
+            self.assertEqual(rfonts[0].get(f"{{{_W_NS}}}ascii"), "Roboto")
+            self.assertEqual(rfonts[0].get(f"{{{_W_NS}}}hAnsi"), "Roboto")
+            self.assertIsNone(rfonts[0].get(f"{{{_W_NS}}}cs"))
+
 
 # ---------------------------------------------------------------------------
 # verify: fail-closed against the shell's available fonts
@@ -234,6 +338,1694 @@ class AppearanceTargetsCheckTest(unittest.TestCase):
             self.assertEqual(
                 checks_deterministic.check_appearance_targets(shell, prof), []
             )
+
+
+# ---------------------------------------------------------------------------
+# extract: theme major/minor fonts are TRUTHFUL (read from the package)
+# ---------------------------------------------------------------------------
+def _docx_with_parts(tmp_path, *, theme: str | None, styles: str | None) -> Path:
+    """A minimal package carrying only the parts the font reader touches."""
+    path = tmp_path / "shell.docx"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", "<x/>")
+        if theme is not None:
+            z.writestr("word/theme/theme1.xml", theme)
+        if styles is not None:
+            z.writestr("word/styles.xml", styles)
+    return path
+
+
+def _theme_xml(major: str | None, minor: str | None) -> str:
+    def font(tag: str, face: str | None) -> str:
+        if face is None:
+            return f"<a:{tag}/>"
+        return f'<a:{tag}><a:latin typeface="{face}"/></a:{tag}>'
+
+    return (
+        f'<a:theme xmlns:a="{_A_NS}"><a:themeElements>'
+        f'<a:fontScheme name="X">'
+        f"{font('majorFont', major)}{font('minorFont', minor)}"
+        f"</a:fontScheme></a:themeElements></a:theme>"
+    )
+
+
+def _styles_xml(ascii_face: str | None) -> str:
+    rfonts = "" if ascii_face is None else f'<w:rFonts w:ascii="{ascii_face}"/>'
+    return (
+        f'<w:styles xmlns:w="{_W_NS}"><w:docDefaults><w:rPrDefault>'
+        f"<w:rPr>{rfonts}</w:rPr></w:rPrDefault></w:docDefaults></w:styles>"
+    )
+
+
+class ThemeFontsExtractTest(unittest.TestCase):
+    def test_default_shell_reads_theme_latin_and_arial_baseline(self):
+        # python-docx's stock template: theme major=Calibri, minor=Cambria, and a
+        # docDefaults rFonts that carries only a THEME reference (no literal ascii),
+        # so the major fallback keeps Word's Arial baseline and the minor fallback
+        # is None (no real ascii to record).
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            fonts = docx_extract._extract_theme(shell)["fonts"]
+            self.assertEqual(fonts["major"], {"latin": "Calibri", "fallback": "Arial"})
+            self.assertEqual(fonts["minor"], {"latin": "Cambria", "fallback": None})
+
+    def test_major_minor_typeface_is_read_from_theme1(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _docx_with_parts(
+                Path(td),
+                theme=_theme_xml("Montserrat", "Inter"),
+                styles=_styles_xml(None),
+            )
+            fonts = docx_extract._extract_theme(shell)["fonts"]
+            self.assertEqual(fonts["major"]["latin"], "Montserrat")
+            self.assertEqual(fonts["minor"]["latin"], "Inter")
+
+    def test_empty_typeface_is_treated_as_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _docx_with_parts(
+                Path(td),
+                theme=_theme_xml("", "Inter"),
+                styles=_styles_xml(None),
+            )
+            fonts = docx_extract._extract_theme(shell)["fonts"]
+            self.assertIsNone(fonts["major"]["latin"])
+            self.assertEqual(fonts["minor"]["latin"], "Inter")
+
+    def test_doc_default_ascii_drives_the_fallbacks(self):
+        # An explicit docDefaults ascii is the document's real baseline: the minor
+        # fallback IS that ascii, and the major fallback uses it instead of Arial.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _docx_with_parts(
+                Path(td),
+                theme=_theme_xml("Montserrat", "Inter"),
+                styles=_styles_xml("Georgia"),
+            )
+            fonts = docx_extract._extract_theme(shell)["fonts"]
+            self.assertEqual(fonts["major"]["fallback"], "Georgia")
+            self.assertEqual(fonts["minor"]["fallback"], "Georgia")
+
+    def test_missing_theme_part_yields_none_without_crashing(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _docx_with_parts(Path(td), theme=None, styles=None)
+            fonts = docx_extract._extract_theme(shell)["fonts"]
+            self.assertEqual(fonts["major"], {"latin": None, "fallback": "Arial"})
+            self.assertEqual(fonts["minor"], {"latin": None, "fallback": None})
+
+    def test_theme_latin_widens_the_appearance_allow_set(self):
+        # The truthful major/minor latin faces are exactly what widens the
+        # allow-set check_appearance_targets validates an applied body font against.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            theme = docx_extract._extract_theme(shell)
+            theme["fonts"]["body"] = {"latin": "Cambria"}  # the minor latin face
+            prof = _profile(theme=theme)
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+
+# ---------------------------------------------------------------------------
+# capture: size and color as INDEPENDENT axes
+# ---------------------------------------------------------------------------
+class CaptureSizeColorTest(unittest.TestCase):
+    def test_dominant_body_size_captured_into_theme_fonts(self):
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run("body").font.size = Pt(11)  # 22 half-points
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertEqual(theme["fonts"]["body"]["size_hp"], 22)
+        self.assertGreaterEqual(theme["fonts"]["body"]["size_confidence"], 0.6)
+
+    def test_dominant_body_color_hex_captured_into_theme_text(self):
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run("body").font.color.rgb = RGBColor.from_string(
+                "1F4E79"
+            )
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        # The additive theme.text key (theme.fonts untouched).
+        self.assertEqual(
+            theme["text"]["body"]["color"], {"kind": "hex", "hex": "1F4E79"}
+        )
+        self.assertGreaterEqual(theme["text"]["body"]["color_confidence"], 0.6)
+        self.assertNotIn("color", theme["fonts"].get("body", {}))
+
+    def test_dominant_body_color_theme_token_captured(self):
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run(
+                "body"
+            ).font.color.theme_color = MSO_THEME_COLOR.ACCENT_1
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertEqual(
+            theme["text"]["body"]["color"], {"kind": "theme", "theme": "accent1"}
+        )
+
+    def test_size_and_color_are_independent_of_font(self):
+        # A run with an explicit SIZE but no explicit FONT must capture size only,
+        # leaving the font axis untouched (independence).
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run("body").font.size = Pt(12)  # 24 half-points
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertEqual(theme["fonts"]["body"]["size_hp"], 24)
+        self.assertNotIn("latin", theme["fonts"]["body"])
+
+    def test_per_role_size_color_captured_independently(self):
+        doc = Document()
+        for _ in range(4):
+            run = doc.add_paragraph(style="Heading 1").add_run("H")
+            run.font.size = Pt(18)  # 36 half-points
+            run.font.color.rgb = RGBColor.from_string("C00000")
+        roles = {
+            "_index": ["heading.1"],
+            "heading.1": {
+                "resolver": {
+                    "type": "named_style",
+                    "style_id": "Heading1",
+                    "style_name": "Heading 1",
+                },
+                "appearance": {},
+            },
+        }
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, roles, theme)
+        appearance = roles["heading.1"]["appearance"]
+        self.assertEqual(appearance["size_hp"], 36)
+        self.assertEqual(appearance["color"], {"kind": "hex", "hex": "C00000"})
+
+    def test_no_explicit_size_or_color_captures_nothing(self):
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run("inherits everything")
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertNotIn("body", theme["fonts"])
+        self.assertNotIn("text", theme)
+
+    def test_below_threshold_size_captures_nothing(self):
+        doc = Document()
+        for hp_pt in (10, 11, 12, 14):  # 1/4 each, no winner
+            doc.add_paragraph().add_run("x").font.size = Pt(hp_pt)
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertNotIn("size_hp", theme["fonts"].get("body", {}))
+
+
+# ---------------------------------------------------------------------------
+# resolver: size/color independence + the heading-no-body-default rule
+# ---------------------------------------------------------------------------
+class ResolverSizeColorTest(unittest.TestCase):
+    def _prof(self, heading_appearance=None):
+        return {
+            "kind": "docx",
+            "theme": {
+                "colors": {},
+                "fonts": {"body": {"latin": "Roboto", "size_hp": 22}},
+                "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+            },
+            "roles": {
+                "_index": ["heading.1", "paragraph"],
+                "heading.1": {
+                    "resolver": {"type": "named_style", "style_id": "Heading1"},
+                    "appearance": heading_appearance or {},
+                    "status": "robust",
+                    "confidence": 1.0,
+                },
+                "paragraph": {
+                    "resolver": {"type": "named_style", "style_id": "Normal"},
+                    "appearance": {},
+                    "status": "robust",
+                    "confidence": 1.0,
+                },
+            },
+        }
+
+    def test_body_size_color_flow_to_paragraph(self):
+        op = ProfileResolver(self._prof()).resolve_role("paragraph")
+        self.assertEqual(op.appearance["size_hp"], 22)
+        self.assertEqual(op.appearance["color"], {"kind": "hex", "hex": "1F4E79"})
+        # Font body-default flows too (v1 behavior).
+        self.assertEqual(op.appearance["font"]["latin"], "Roboto")
+
+    def test_body_size_color_do_not_flow_to_heading(self):
+        # The CRITICAL rule: body size/color must NEVER override a heading's intrinsic
+        # style size/color. The font body-default still flows.
+        op = ProfileResolver(self._prof()).resolve_role("heading.1")
+        self.assertNotIn("size_hp", op.appearance)
+        self.assertNotIn("color", op.appearance)
+        self.assertEqual(op.appearance["font"]["latin"], "Roboto")
+
+    def test_role_specific_size_color_apply_to_heading(self):
+        # A role-SPECIFIC captured size/color still applies to a heading (only the
+        # BODY default is gated off it).
+        prof = self._prof(
+            heading_appearance={
+                "size_hp": 48,
+                "color": {"kind": "theme", "theme": "accent1"},
+            }
+        )
+        op = ProfileResolver(prof).resolve_role("heading.1")
+        self.assertEqual(op.appearance["size_hp"], 48)
+        self.assertEqual(op.appearance["color"], {"kind": "theme", "theme": "accent1"})
+
+    def test_missing_role_stub_gets_body_size_color(self):
+        # The body/paragraph stub keeps the body size/color defaults.
+        op = ProfileResolver(self._prof()).resolve_role(
+            "paragraph", fallback="paragraph"
+        )
+        self.assertEqual(op.appearance["size_hp"], 22)
+        self.assertEqual(op.appearance["color"], {"kind": "hex", "hex": "1F4E79"})
+
+    def test_pre_feature_profile_resolves_empty_appearance(self):
+        # Backward-compat: a profile with no appearance/theme.text/size_hp resolves
+        # to an empty appearance, exactly as before this feature.
+        prof = {
+            "kind": "docx",
+            "theme": {"colors": {}, "fonts": {}},
+            "roles": {
+                "_index": ["paragraph"],
+                "paragraph": {
+                    "resolver": {"type": "named_style", "style_id": "Normal"},
+                    "appearance": {},
+                },
+            },
+        }
+        op = ProfileResolver(prof).resolve_role("paragraph")
+        self.assertEqual(op.appearance, {})
+
+
+# ---------------------------------------------------------------------------
+# apply: per-axis guards, independence, idempotency, backward-compat
+# ---------------------------------------------------------------------------
+class ApplySizeColorTest(unittest.TestCase):
+    def _para_runs(self, out):
+        return [r for p in Document(out).paragraphs for r in p.runs]
+
+    def test_body_size_applied_to_generated_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(theme={"colors": {}, "fonts": {"body": {"size_hp": 22}}})
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "sized body"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            sizes = {r.font.size for r in self._para_runs(out) if r.text}
+            self.assertIn(Pt(11), sizes)  # 22 half-points -> 11pt
+
+    def test_body_hex_color_applied_to_generated_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "colored body"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            colored = [
+                r
+                for r in self._para_runs(out)
+                if r.text and r.font.color.type == MSO_COLOR_TYPE.RGB
+            ]
+            self.assertTrue(colored)
+            self.assertEqual(str(colored[0].font.color.rgb), "1F4E79")
+
+    def test_role_theme_color_applied_to_generated_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={"colors": {}, "fonts": {}},
+                roles={
+                    "_index": ["heading.1"],
+                    "heading.1": {
+                        "resolver": {
+                            "type": "named_style",
+                            "style_id": "Heading1",
+                            "style_name": "Heading 1",
+                        },
+                        "appearance": {"color": {"kind": "theme", "theme": "accent1"}},
+                    },
+                },
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Heading(level=1, runs=[{"t": "Title"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            themed = [
+                r
+                for r in self._para_runs(out)
+                if r.text and r.font.color.type == MSO_COLOR_TYPE.THEME
+            ]
+            self.assertTrue(themed)
+            self.assertEqual(themed[0].font.color.theme_color, MSO_THEME_COLOR.ACCENT_1)
+
+    def test_size_without_font_still_applies(self):
+        # Per-axis-guard independence: a role with size-but-no-font applies the size.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(theme={"colors": {}, "fonts": {"body": {"size_hp": 28}}})
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "sized but unfonted"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertTrue(runs)
+            self.assertIn(Pt(14), {r.font.size for r in runs})  # 28 hp -> 14pt
+            self.assertEqual({r.font.name for r in runs}, {None})  # font untouched
+
+    def test_unmapped_theme_token_skips_and_records_finding(self):
+        # A theme token outside the closed table is SKIPPED (color left inherited)
+        # with an INFO finding, never a raise.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "theme", "theme": "bogus"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            findings: list = []
+            docx_generate.generate(prof, shell, idoc, out, findings=findings)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertEqual({r.font.color.type for r in runs}, {None})
+            self.assertTrue(
+                any(f.check == "appearance_color_skipped" for f in findings)
+            )
+
+    def test_no_typography_leaves_runs_unsized_and_uncolored(self):
+        # Backward-compat: a pre-feature profile (no appearance/theme.text/size_hp)
+        # leaves runs with no direct size or color.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(theme={"colors": {}, "fonts": {}})
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "plain"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertEqual({r.font.size for r in runs}, {None})
+            self.assertEqual({r.font.color.type for r in runs}, {None})
+
+    def test_size_color_paths_are_byte_idempotent(self):
+        # Generating twice with size + hex color must be byte-identical.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out1 = Path(td) / "out1.docx"
+            out2 = Path(td) / "out2.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {"body": {"size_hp": 22}},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "idempotent body"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out1)
+            docx_generate.generate(prof, shell, idoc, out2)
+            self.assertEqual(out1.read_bytes(), out2.read_bytes())
+
+    def test_theme_color_path_is_byte_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out1 = Path(td) / "out1.docx"
+            out2 = Path(td) / "out2.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "theme", "theme": "accent1"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "themed body"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out1)
+            docx_generate.generate(prof, shell, idoc, out2)
+            self.assertEqual(out1.read_bytes(), out2.read_bytes())
+
+
+# ---------------------------------------------------------------------------
+# verify: re-validate size/color against the shell's true provenance
+# ---------------------------------------------------------------------------
+class AppearanceSizeColorCheckTest(unittest.TestCase):
+    def test_off_template_size_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            # The shell carries a run at 22 half-points; an applied 99 is off-template.
+            shell = _shell(Path(td), size_hp=22)
+            prof = _profile(theme={"colors": {}, "fonts": {"body": {"size_hp": 99}}})
+            findings = checks_deterministic.check_appearance_targets(shell, prof)
+            errs = [f for f in findings if f.check == "appearance_targets_exist"]
+            self.assertTrue(errs)
+            self.assertTrue(
+                all(f.severity == schema.Severity.ERROR.value for f in errs)
+            )
+
+    def test_on_template_size_is_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td), size_hp=22)
+            prof = _profile(theme={"colors": {}, "fonts": {"body": {"size_hp": 22}}})
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_off_palette_hex_color_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "ABCDEF"}}},
+                }
+            )
+            findings = checks_deterministic.check_appearance_targets(shell, prof)
+            errs = [f for f in findings if f.check == "appearance_targets_exist"]
+            self.assertTrue(errs)
+            self.assertTrue(
+                all(f.severity == schema.Severity.ERROR.value for f in errs)
+            )
+
+    def test_run_provenance_hex_color_is_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            # The hex is on a run in the shell, even though not a palette slot.
+            shell = _shell(Path(td), hex_color="123456")
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "123456"}}},
+                }
+            )
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_palette_theme_token_color_is_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            # accent1 is present in python-docx's stock theme palette.
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "theme", "theme": "accent1"}}},
+                }
+            )
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_text1_token_maps_to_dk1_and_is_accepted(self):
+        # The closed alias table must map text1 -> dk1 (present in the palette),
+        # which resolve_theme_color's tx1/bg1 subset would NOT cover.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "theme", "theme": "text1"}}},
+                }
+            )
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_empty_appearance_profile_has_no_size_color_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(theme={"colors": {}, "fonts": {}})
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+
+# ---------------------------------------------------------------------------
+# verify: fold theme.palette refs into check_appearance_targets (model-driven color)
+# ---------------------------------------------------------------------------
+class PaletteRefAppearanceCheckTest(unittest.TestCase):
+    """Every theme.palette[*].ref is an applicable run color (a token resolves to
+    it), so check_appearance_targets must re-validate each against the shell, the
+    same loop as a role/body color - fail-closed on a ref the shell cannot back."""
+
+    def test_palette_theme_slot_ref_present_in_shell_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            # accent1 is in python-docx's stock clrScheme palette.
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {
+                        "accent1": {"ref": {"kind": "theme", "theme": "accent1"}}
+                    },
+                }
+            )
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_palette_clrscheme_slot_ref_dk1_accepted(self):
+        # A SEEDED palette keys theme refs by the clrScheme slot name directly
+        # (dk1/lt1/hlink...), which has no WML themeColor alias; the check must
+        # accept it because it is itself a parsed-palette slot.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {"dk1": {"ref": {"kind": "theme", "theme": "dk1"}}},
+                }
+            )
+            self.assertEqual(
+                checks_deterministic.check_appearance_targets(shell, prof), []
+            )
+
+    def test_palette_ref_absent_from_shell_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            # A hex ref the shell neither declares in its palette nor uses on a run.
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {
+                        "hex:ABCDEF": {"ref": {"kind": "hex", "hex": "ABCDEF"}}
+                    },
+                }
+            )
+            findings = checks_deterministic.check_appearance_targets(shell, prof)
+            errs = [
+                f
+                for f in findings
+                if f.check == "appearance_targets_exist"
+                and f.severity == schema.Severity.ERROR.value
+            ]
+            self.assertTrue(errs, [f.message for f in findings])
+            self.assertTrue(any("theme.palette.hex:ABCDEF" in f.message for f in errs))
+
+    def test_palette_theme_token_ref_absent_slot_is_error(self):
+        # A theme ref naming a slot the shell's clrScheme does not carry fails closed.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {
+                        "bogus": {"ref": {"kind": "theme", "theme": "notaslot"}}
+                    },
+                }
+            )
+            findings = checks_deterministic.check_appearance_targets(shell, prof)
+            self.assertTrue(
+                any(
+                    f.check == "appearance_targets_exist"
+                    and f.severity == schema.Severity.ERROR.value
+                    for f in findings
+                )
+            )
+
+
+# ---------------------------------------------------------------------------
+# verify: check_color_token_targets (color-token membership against theme.palette)
+# ---------------------------------------------------------------------------
+class ColorTokenTargetsCheckTest(unittest.TestCase):
+    def _present_comp_profile(self, palette, annotations):
+        prof = _profile(theme={"colors": {}, "fonts": {}, "palette": palette})
+        prof["comprehension"] = schema.empty_comprehension()
+        prof["comprehension"]["status"] = schema.ComprehensionStatus.PRESENT.value
+        prof["comprehension"]["palette_annotations"] = annotations
+        return prof
+
+    def test_annotation_key_in_palette_is_ok(self):
+        prof = self._present_comp_profile(
+            {"accent1": {"ref": {"kind": "theme", "theme": "accent1"}}},
+            {"accent1": {"name": "primary"}},
+        )
+        self.assertEqual(checks_deterministic.check_color_token_targets(prof), [])
+
+    def test_annotation_key_absent_from_palette_is_error(self):
+        prof = self._present_comp_profile(
+            {"accent1": {"ref": {"kind": "theme", "theme": "accent1"}}},
+            {"accent9": {"name": "ghost"}},
+        )
+        findings = checks_deterministic.check_color_token_targets(prof)
+        self.assertEqual(len(findings), 1, [f.message for f in findings])
+        self.assertEqual(findings[0].check, "color_token_targets_exist")
+        self.assertEqual(findings[0].severity, schema.Severity.ERROR.value)
+        self.assertIn("accent9", findings[0].message)
+
+    def test_annotation_key_into_empty_palette_is_error(self):
+        # Fail-closed on empty: a key into an EMPTY palette is itself an ERROR.
+        prof = self._present_comp_profile({}, {"accent1": {"name": "x"}})
+        findings = checks_deterministic.check_color_token_targets(prof)
+        self.assertTrue(
+            any(f.severity == schema.Severity.ERROR.value for f in findings)
+        )
+
+    def test_absent_comprehension_is_a_noop(self):
+        prof = _profile(
+            theme={
+                "colors": {},
+                "fonts": {},
+                "palette": {"accent1": {"ref": {"kind": "theme", "theme": "accent1"}}},
+            }
+        )
+        # default comprehension is 'absent'
+        self.assertEqual(checks_deterministic.check_color_token_targets(prof), [])
+
+    def test_wired_into_run_qa(self):
+        from brandkit.qa.gate import run_qa
+
+        prof = self._present_comp_profile(
+            {"accent1": {"ref": {"kind": "theme", "theme": "accent1"}}},
+            {"accent9": {"name": "ghost"}},
+        )
+        report = run_qa(None, prof, qa="fast", shell=None)
+        self.assertTrue(
+            any(
+                f.check == "color_token_targets_exist"
+                and f.severity == schema.Severity.ERROR.value
+                for f in report.findings
+            ),
+            [f.message for f in report.findings],
+        )
+
+
+def _run_with_theme_color(token: str):
+    """A docx run carrying an explicit ``w:themeColor`` token, written as raw XML so
+    even a spec-valid-but-unmappable token ('none'/'phClr') or the 'UNMAPPED'
+    sentinel can be driven through the capture reader."""
+    run = Document().add_paragraph().add_run("x")
+    rpr = run._r.get_or_add_rPr()
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "auto")
+    color.set(qn("w:themeColor"), token)
+    rpr.append(color)
+    return run
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the code+quality review fixes (apply/verify symmetry,
+# capture crash-safety, heading-fallback gating, verify alias/ERROR coverage).
+# ---------------------------------------------------------------------------
+class ReviewFixRegressionTest(unittest.TestCase):
+    def test_capture_ignores_unmappable_theme_color_without_crashing(self):
+        # A spec-valid w:themeColor python-docx cannot map (e.g. 'none'/'phClr')
+        # makes .theme_color raise; capture must swallow it, not crash extraction.
+        for token in ("none", "phClr"):
+            with self.subTest(token=token):
+                self.assertIsNone(typography._run_color(_run_with_theme_color(token)))
+
+    def test_capture_drops_unmapped_theme_sentinel(self):
+        token = MSO_THEME_COLOR.NOT_THEME_COLOR.xml_value  # "UNMAPPED"
+        self.assertIsNone(typography._run_color(_run_with_theme_color(token)))
+
+    def test_minority_accent_color_is_not_captured_as_body(self):
+        # 10 runs, only 2 carry an explicit accent color while 8 inherit: the accent
+        # must NOT become the body color (it does not dominate ALL runs). This is the
+        # real-template inversion (a 2% blue accent over mostly-inherited body text).
+        doc = Document()
+        for i in range(10):
+            run = doc.add_paragraph().add_run("body")
+            if i < 2:
+                run.font.color.rgb = RGBColor.from_string("3D85C6")
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertNotIn("text", theme)  # no body color captured
+
+    def test_explicit_color_on_all_runs_is_still_captured(self):
+        # Sanity peer: when the color IS on (almost) every run it dominates and is
+        # captured - the dominance gate is over ALL runs, not just explicit ones.
+        doc = Document()
+        for _ in range(10):
+            doc.add_paragraph().add_run("b").font.color.rgb = RGBColor.from_string(
+                "333333"
+            )
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_fonts(doc, {"_index": []}, theme)
+        self.assertEqual(
+            theme["text"]["body"]["color"], {"kind": "hex", "hex": "333333"}
+        )
+
+    def test_apply_unmapped_theme_token_skips_with_finding(self):
+        run = Document().add_paragraph().add_run("x")
+        findings = []
+        docx_generate._brand_run_color(
+            run,
+            {"kind": "theme", "theme": MSO_THEME_COLOR.NOT_THEME_COLOR.xml_value},
+            findings,
+        )
+        self.assertIsNone(run.font.color.type)  # left inherited, nothing written
+        self.assertTrue(any(f.check == "appearance_color_skipped" for f in findings))
+
+    def test_apply_normalizes_hash_and_short_hex(self):
+        for spelling, expected in (("#1F4E79", "1F4E79"), ("#fff", "FFFFFF")):
+            with self.subTest(spelling=spelling):
+                run = Document().add_paragraph().add_run("x")
+                docx_generate._brand_run_color(
+                    run, {"kind": "hex", "hex": spelling}, []
+                )
+                self.assertEqual(str(run.font.color.rgb), expected)
+
+    def test_apply_malformed_hex_skips_with_finding_not_crash(self):
+        run = Document().add_paragraph().add_run("x")
+        findings = []
+        docx_generate._brand_run_color(run, {"kind": "hex", "hex": "zzzzzz"}, findings)
+        self.assertIsNone(run.font.color.type)
+        self.assertTrue(any(f.check == "appearance_color_skipped" for f in findings))
+
+    def test_heading_fallback_does_not_inherit_body_size_color(self):
+        # A heading.* that falls back to the paragraph style must keep the body FONT
+        # (family-agnostic) but NOT the body size/color default (gated on the
+        # originally requested role, so the Heading style's intrinsic size survives).
+        prof = {
+            "kind": "docx",
+            "theme": {
+                "colors": {},
+                "fonts": {"body": {"latin": "Roboto", "size_hp": 32}},
+                "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+            },
+            "roles": {
+                "_index": ["paragraph"],
+                "paragraph": {
+                    "resolver": {"type": "named_style", "style_id": "Normal"},
+                },
+            },
+        }
+        op = ProfileResolver(prof).resolve_role("heading.1", fallback="paragraph")
+        self.assertEqual((op.appearance.get("font") or {}).get("latin"), "Roboto")
+        self.assertIsNone(op.appearance.get("size_hp"))
+        self.assertIsNone(op.appearance.get("color"))
+
+    def test_verify_accepts_non_identity_theme_aliases(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            for token in (
+                "background1",
+                "background2",
+                "light1",
+                "light2",
+                "hyperlink",
+                "followedHyperlink",
+                "text2",
+            ):
+                prof = _profile(
+                    theme={
+                        "colors": {},
+                        "fonts": {},
+                        "text": {"body": {"color": {"kind": "theme", "theme": token}}},
+                    }
+                )
+                with self.subTest(token=token):
+                    self.assertEqual(
+                        checks_deterministic.check_appearance_targets(shell, prof), []
+                    )
+
+    def test_verify_errors_on_unmapped_theme_token(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "theme", "theme": "bogus"}}},
+                }
+            )
+            findings = checks_deterministic.check_appearance_targets(shell, prof)
+            errs = [f for f in findings if f.check == "appearance_targets_exist"]
+            self.assertTrue(errs)
+            self.assertTrue(
+                all(f.severity == schema.Severity.ERROR.value for f in errs)
+            )
+
+    def test_color_only_apply_leaves_font_and_size_untouched(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td), hex_color="1F4E79")
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            colored = [
+                r
+                for p in Document(out).paragraphs
+                for r in p.runs
+                if r.font.color.type is not None
+            ]
+            self.assertTrue(colored)
+            self.assertEqual({str(r.font.color.rgb) for r in colored}, {"1F4E79"})
+            self.assertEqual({r.font.name for r in colored}, {None})  # font untouched
+            self.assertEqual({r.font.size for r in colored}, {None})  # size untouched
+
+
+# ---------------------------------------------------------------------------
+# theme.palette capture (the UNDERSTAND half of model-driven color)
+# ---------------------------------------------------------------------------
+def _link_run(para, text, *, hex_color=None):
+    """Append a run physically nested under a ``w:hyperlink`` element (a real
+    link run), optionally carrying an explicit ``w:color`` hex, and return it."""
+    hyperlink = OxmlElement("w:hyperlink")
+    run = para.add_run(text)
+    if hex_color is not None:
+        run.font.color.rgb = RGBColor.from_string(hex_color)
+    para._p.remove(run._r)
+    hyperlink.append(run._r)
+    para._p.append(hyperlink)
+    return run
+
+
+class CapturePaletteTest(unittest.TestCase):
+    def _theme(self, colors=None, palette_roles=None):
+        return {
+            "colors": colors if colors is not None else {},
+            "palette_roles": palette_roles or {},
+            "fonts": {},
+        }
+
+    def test_dominant_accent_and_role_color_captured(self):
+        # A dominant body color (12 runs), a SPARSE accent (3 runs, below the
+        # dominance gate but at the accent floor), and a per-role theme color.
+        doc = Document()
+        for _ in range(12):
+            doc.add_paragraph().add_run("body").font.color.rgb = RGBColor.from_string(
+                "333333"
+            )
+        for _ in range(3):
+            doc.add_paragraph().add_run("accent").font.color.rgb = RGBColor.from_string(
+                "C00000"
+            )
+        for _ in range(4):
+            run = doc.add_paragraph(style="Heading 1").add_run("H")
+            run.font.color.theme_color = MSO_THEME_COLOR.ACCENT_1
+        roles = {
+            "_index": ["heading.1"],
+            "heading.1": {
+                "resolver": {
+                    "type": "named_style",
+                    "style_id": "Heading1",
+                    "style_name": "Heading 1",
+                },
+                "appearance": {},
+            },
+        }
+        theme = self._theme(
+            colors={"accent1": {"hex": "4472C4"}, "dk1": {"hex": "000000"}},
+            palette_roles={"primary": {"theme": "accent1"}, "text": {"theme": "dk1"}},
+        )
+        typography.capture_fonts(doc, roles, theme)
+        typography.capture_palette(doc, roles, theme)
+        palette = theme["palette"]
+        # Dominant body color -> dominant; sparse accent -> accent (no dominance gate).
+        self.assertEqual(palette["hex:333333"]["frequency"], "dominant")
+        self.assertEqual(palette["hex:333333"]["ref"], {"kind": "hex", "hex": "333333"})
+        self.assertEqual(palette["hex:C00000"]["frequency"], "accent")
+        # The per-role theme color folds in as a role.appearance + run.color fact and
+        # the palette_role map names it (palette_role) - byte-identical ref to
+        # typography._color_obj.
+        self.assertEqual(
+            palette["accent1"]["ref"], {"kind": "theme", "theme": "accent1"}
+        )
+        wheres = {p["where"] for p in palette["accent1"]["provenance"]}
+        self.assertIn("role.appearance", wheres)
+        self.assertIn("run.color", wheres)
+        self.assertIn("palette_role", wheres)
+        # name/purpose/use_when are null in the deterministic path (model fills them).
+        for entry in palette.values():
+            self.assertIsNone(entry["name"])
+            self.assertIsNone(entry["purpose"])
+            self.assertIsNone(entry["use_when"])
+
+    def test_provenance_is_sorted_and_deduped(self):
+        doc = Document()
+        for _ in range(4):
+            run = doc.add_paragraph(style="Heading 1").add_run("H")
+            run.font.color.theme_color = MSO_THEME_COLOR.ACCENT_1
+        roles = {
+            "_index": ["heading.1"],
+            "heading.1": {
+                "resolver": {
+                    "type": "named_style",
+                    "style_id": "Heading1",
+                    "style_name": "Heading 1",
+                },
+                "appearance": {},
+            },
+        }
+        theme = self._theme(
+            colors={"accent1": {"hex": "4472C4"}},
+            palette_roles={"primary": {"theme": "accent1"}},
+        )
+        typography.capture_fonts(doc, roles, theme)
+        typography.capture_palette(doc, roles, theme)
+        provenance = theme["palette"]["accent1"]["provenance"]
+        keys = [(p["where"], p["detail"]) for p in provenance]
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_sparse_accent_does_not_require_dominance(self):
+        # 3 runs of an accent on a body of 20 inheriting runs: the accent NEVER
+        # dominates, yet the low-floor aggregation records it as an accent entry.
+        doc = Document()
+        for i in range(20):
+            run = doc.add_paragraph().add_run("body")
+            if i < 3:
+                run.font.color.rgb = RGBColor.from_string("3D85C6")
+        theme = self._theme()
+        typography.capture_palette(doc, {"_index": []}, theme)
+        self.assertIn("hex:3D85C6", theme["palette"])
+        self.assertEqual(theme["palette"]["hex:3D85C6"]["frequency"], "accent")
+
+    def test_below_accent_floor_is_rare(self):
+        # 2 runs (below the floor of 3) of an off-theme color: still recorded (it is
+        # observed) but as ``rare``, never ``accent``.
+        doc = Document()
+        for i in range(20):
+            run = doc.add_paragraph().add_run("body")
+            if i < 2:
+                run.font.color.rgb = RGBColor.from_string("AB12CD")
+        theme = self._theme()
+        typography.capture_palette(doc, {"_index": []}, theme)
+        self.assertEqual(theme["palette"]["hex:AB12CD"]["frequency"], "rare")
+
+    def test_empty_palette_when_nothing_observed(self):
+        # No theme colors, no palette_roles, no observed run/link/role colors -> {}.
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph().add_run("inherits everything")
+        theme = self._theme()
+        typography.capture_palette(doc, {"_index": []}, theme)
+        self.assertEqual(theme["palette"], {})
+
+    def test_link_color_falls_back_to_theme_hlink_slot(self):
+        # No explicit link-colored run, but the theme declares hlink/folHlink: those
+        # slots carry a link.color where-fact (the link palette is non-empty).
+        doc = Document()
+        theme = self._theme(
+            colors={"hlink": {"hex": "0563C1"}, "folHlink": {"hex": "954F72"}}
+        )
+        typography.capture_palette(doc, {"_index": []}, theme)
+        for slot in ("hlink", "folHlink"):
+            wheres = {p["where"] for p in theme["palette"][slot]["provenance"]}
+            self.assertIn("link.color", wheres)
+
+    def test_explicit_link_run_color_recorded_as_link_color(self):
+        # A run physically under a w:hyperlink with an explicit off-theme hex is an
+        # observed link color (link.color where-fact on its hex entry).
+        doc = Document()
+        para = doc.add_paragraph()
+        for _ in range(1):
+            _link_run(para, "site", hex_color="0000EE")
+        theme = self._theme()
+        typography.capture_palette(doc, {"_index": []}, theme)
+        wheres = {p["where"] for p in theme["palette"]["hex:0000EE"]["provenance"]}
+        self.assertIn("link.color", wheres)
+        self.assertIn("run.color", wheres)
+
+    def test_re_extract_is_byte_identical(self):
+        doc = Document()
+        for _ in range(6):
+            doc.add_paragraph().add_run("b").font.color.rgb = RGBColor.from_string(
+                "112233"
+            )
+        for _ in range(3):
+            doc.add_paragraph().add_run("a").font.color.rgb = RGBColor.from_string(
+                "445566"
+            )
+        theme1 = self._theme(colors={"accent1": {"hex": "4472C4"}})
+        theme2 = self._theme(colors={"accent1": {"hex": "4472C4"}})
+        typography.capture_palette(doc, {"_index": []}, theme1)
+        rt = _round_trip(doc)
+        self.addCleanup(lambda: Path(rt).unlink(missing_ok=True))
+        typography.capture_palette(Document(rt), {"_index": []}, theme2)
+        import json
+
+        self.assertEqual(
+            json.dumps(theme1["palette"], sort_keys=True),
+            json.dumps(theme2["palette"], sort_keys=True),
+        )
+
+    def test_capture_palette_is_idempotent_on_rerun(self):
+        # Calling capture_palette twice on the SAME theme dict must not double up
+        # provenance or change anything (de-dup + stable keys).
+        doc = Document()
+        for _ in range(5):
+            run = doc.add_paragraph(style="Heading 1").add_run("H")
+            run.font.color.theme_color = MSO_THEME_COLOR.ACCENT_1
+        roles = {
+            "_index": ["heading.1"],
+            "heading.1": {
+                "resolver": {
+                    "type": "named_style",
+                    "style_id": "Heading1",
+                    "style_name": "Heading 1",
+                },
+                "appearance": {},
+            },
+        }
+        theme = self._theme(
+            colors={"accent1": {"hex": "4472C4"}},
+            palette_roles={"primary": {"theme": "accent1"}},
+        )
+        typography.capture_fonts(doc, roles, theme)
+        import copy
+
+        typography.capture_palette(doc, roles, theme)
+        once = copy.deepcopy(theme["palette"])
+        typography.capture_palette(doc, roles, theme)
+        self.assertEqual(theme["palette"], once)
+
+
+def _round_trip(doc):
+    """Save a python-docx Document to a temp path and return that path (so a second
+    capture pass reads from a fresh package, proving capture is input-stable)."""
+    fd = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    fd.close()
+    doc.save(fd.name)
+    return fd.name
+
+
+# ---------------------------------------------------------------------------
+# extract: theme.palette is captured + saved + schema-valid (end-to-end)
+# ---------------------------------------------------------------------------
+class PaletteExtractEndToEndTest(unittest.TestCase):
+    def test_empty_theme_carries_palette(self):
+        self.assertEqual(schema._empty_theme()["palette"], {})
+
+    def test_build_envelope_theme_has_palette(self):
+        prof = schema.build_envelope("docx", {"name": "t"})
+        self.assertEqual(prof["theme"]["palette"], {})
+
+    def test_extract_saves_schema_valid_profile_with_palette(self):
+        import json
+
+        # Build a tiny in-memory shell with a dominant body color so the palette is
+        # non-empty, then run the full extract pipeline and validate the profile.
+        with tempfile.TemporaryDirectory() as td:
+            tmpl = Path(td) / "tmpl.docx"
+            d = Document()
+            for _ in range(8):
+                d.add_paragraph().add_run("body").font.color.rgb = RGBColor.from_string(
+                    "204060"
+                )
+            d.save(tmpl)
+            saved = docx_extract.extract(str(tmpl), "pal", scope="project", cwd=td)
+            prof = json.loads(Path(saved).read_text())
+            self.assertEqual(schema.validate(prof), [])
+            self.assertIn("palette", prof["theme"])
+            self.assertEqual(
+                prof["theme"]["palette"]["hex:204060"]["frequency"], "dominant"
+            )
+
+
+# ---------------------------------------------------------------------------
+# schema._validate_palette: shape-only structural validation
+# ---------------------------------------------------------------------------
+class ValidatePaletteTest(unittest.TestCase):
+    def test_none_and_empty_are_ok(self):
+        self.assertEqual(schema._validate_palette(None), [])
+        self.assertEqual(schema._validate_palette({}), [])
+
+    def test_well_formed_entry_is_ok(self):
+        palette = {
+            "accent1": {
+                "ref": {"kind": "theme", "theme": "accent1"},
+                "provenance": [{"where": "run.color", "detail": "accent1"}],
+                "frequency": "accent",
+                "name": None,
+                "purpose": None,
+                "use_when": None,
+            },
+            "hex:112233": {
+                "ref": {"kind": "hex", "hex": "112233"},
+                "provenance": [],
+                "frequency": "rare",
+            },
+        }
+        self.assertEqual(schema._validate_palette(palette), [])
+
+    def test_non_object_is_flagged(self):
+        self.assertTrue(schema._validate_palette([1, 2]))
+
+    def test_bad_ref_kind_is_flagged(self):
+        palette = {"x": {"ref": {"kind": "bogus"}}}
+        problems = schema._validate_palette(palette)
+        self.assertTrue(any("ref.kind" in p for p in problems))
+
+    def test_illegal_where_is_flagged(self):
+        palette = {
+            "accent1": {
+                "ref": {"kind": "theme", "theme": "accent1"},
+                "provenance": [{"where": "made_up", "detail": "x"}],
+            }
+        }
+        problems = schema._validate_palette(palette)
+        self.assertTrue(any("where" in p for p in problems))
+
+    def test_illegal_frequency_is_flagged(self):
+        palette = {
+            "accent1": {
+                "ref": {"kind": "theme", "theme": "accent1"},
+                "frequency": "sometimes",
+            }
+        }
+        problems = schema._validate_palette(palette)
+        self.assertTrue(any("frequency" in p for p in problems))
+
+    def test_captured_palette_passes_validation(self):
+        # The real capture output (theme + accent) must be structurally valid.
+        doc = Document()
+        for _ in range(6):
+            doc.add_paragraph().add_run("b").font.color.rgb = RGBColor.from_string(
+                "334455"
+            )
+        theme = {
+            "colors": {"accent1": {"hex": "4472C4"}},
+            "palette_roles": {"primary": {"theme": "accent1"}},
+            "fonts": {},
+        }
+        typography.capture_palette(doc, {"_index": []}, theme)
+        self.assertEqual(schema._validate_palette(theme["palette"]), [])
+
+
+# ---------------------------------------------------------------------------
+# APPLY: model-driven run COLOR token (resolve off theme.palette, apply via the
+# existing _brand_run_color; structural hex rejection in normalize_runs).
+# ---------------------------------------------------------------------------
+def _palette_entry(kind: str, value: str) -> dict:
+    """A minimal valid theme.palette entry whose ref is {kind, ...}."""
+    ref = (
+        {"kind": "theme", "theme": value}
+        if kind == "theme"
+        else {"kind": "hex", "hex": value}
+    )
+    return {
+        "ref": ref,
+        "provenance": [],
+        "frequency": "accent",
+        "name": None,
+        "purpose": None,
+        "use_when": None,
+    }
+
+
+def _palette_profile(palette: dict):
+    """A docx profile carrying ``theme.palette`` (and no body color default)."""
+    return _profile(theme={"colors": {}, "fonts": {}, "palette": palette})
+
+
+class RunColorTokenNormalizeTest(unittest.TestCase):
+    """normalize_runs preserves a valid color TOKEN and STRUCTURALLY drops a hex."""
+
+    def test_valid_theme_slot_token_is_preserved(self):
+        runs = textutil.normalize_runs([{"t": "x", "color": "accent1"}])
+        self.assertEqual(runs, [{"t": "x", "color": "accent1"}])
+
+    def test_dotted_named_token_is_preserved(self):
+        runs = textutil.normalize_runs([{"t": "x", "color": "brand.primary"}])
+        self.assertEqual(runs, [{"t": "x", "color": "brand.primary"}])
+
+    def test_hex_shaped_token_is_dropped(self):
+        # A lowercase 6-char hex passes the role-id regex but is rejected as hex.
+        runs = textutil.normalize_runs([{"t": "x", "color": "abcdef"}])
+        self.assertEqual(runs, [{"t": "x"}])
+
+    def test_uppercase_hex_token_is_dropped(self):
+        runs = textutil.normalize_runs([{"t": "x", "color": "1F4E79"}])
+        self.assertEqual(runs, [{"t": "x"}])
+
+    def test_hash_bearing_token_is_dropped(self):
+        runs = textutil.normalize_runs([{"t": "x", "color": "#fff"}])
+        self.assertEqual(runs, [{"t": "x"}])
+
+    def test_hex_prefixed_palette_key_is_dropped(self):
+        # The off-theme palette key shape `hex:RRGGBB` is NOT a legal run token.
+        runs = textutil.normalize_runs([{"t": "x", "color": "hex:1F4E79"}])
+        self.assertEqual(runs, [{"t": "x"}])
+
+    def test_ir_run_carries_token_through_parse(self):
+        # The IR round-trips the token; a hex-shaped value never enters the IDoc.
+        doc = ir.parse_idoc(
+            {
+                "blocks": [
+                    {"type": "paragraph", "runs": [{"t": "ok", "color": "accent1"}]},
+                    {"type": "paragraph", "runs": [{"t": "no", "color": "abcdef"}]},
+                ]
+            }
+        )
+        self.assertEqual(doc.blocks[0].runs, [{"t": "ok", "color": "accent1"}])
+        self.assertEqual(doc.blocks[1].runs, [{"t": "no"}])
+
+
+class ResolveColorTest(unittest.TestCase):
+    def test_known_token_resolves_to_ref(self):
+        prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+        ref = ProfileResolver(prof).resolve_color("accent1")
+        self.assertEqual(ref, {"kind": "theme", "theme": "accent1"})
+
+    def test_unknown_token_resolves_to_none(self):
+        prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+        self.assertIsNone(ProfileResolver(prof).resolve_color("accent9"))
+
+    def test_empty_palette_resolves_to_none(self):
+        self.assertIsNone(ProfileResolver(_profile()).resolve_color("accent1"))
+
+    def test_falsy_token_resolves_to_none(self):
+        prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+        self.assertIsNone(ProfileResolver(prof).resolve_color(None))
+
+
+class ApplyRunColorTokenTest(unittest.TestCase):
+    def _para_runs(self, out):
+        return [r for p in Document(out).paragraphs for r in p.runs]
+
+    def test_theme_token_resolves_and_applies(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "tinted", "color": "accent1"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            themed = [
+                r
+                for r in self._para_runs(out)
+                if r.text and r.font.color.type == MSO_COLOR_TYPE.THEME
+            ]
+            self.assertTrue(themed)
+            self.assertEqual(themed[0].font.color.theme_color, MSO_THEME_COLOR.ACCENT_1)
+
+    def test_hex_token_resolves_and_applies(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"brand.primary": _palette_entry("hex", "1F4E79")})
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "hexed", "color": "brand.primary"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            colored = [
+                r
+                for r in self._para_runs(out)
+                if r.text and r.font.color.type == MSO_COLOR_TYPE.RGB
+            ]
+            self.assertTrue(colored)
+            self.assertEqual(str(colored[0].font.color.rgb), "1F4E79")
+
+    def test_unknown_token_leaves_inherited_with_info_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "x", "color": "accent9"}])]
+            )
+            findings: list = []
+            docx_generate.generate(prof, shell, idoc, out, findings=findings)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertEqual({r.font.color.type for r in runs}, {None})  # inherited
+            infos = [f for f in findings if f.check == "color_token_unresolved"]
+            self.assertTrue(infos)
+            self.assertEqual(infos[0].severity, schema.Severity.INFO.value)
+
+    def test_explicit_token_wins_over_body_default(self):
+        # Precedence: an explicit run token (accent1) is the first writer; the body
+        # color default (a hex) must NOT overwrite it.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {"accent1": _palette_entry("theme", "accent1")},
+                    "text": {"body": {"color": {"kind": "hex", "hex": "1F4E79"}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "wins", "color": "accent1"}])]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertTrue(runs)
+            # The explicit token wins: the run is a THEME color, not the body hex.
+            self.assertEqual(runs[0].font.color.type, MSO_COLOR_TYPE.THEME)
+            self.assertEqual(runs[0].font.color.theme_color, MSO_THEME_COLOR.ACCENT_1)
+
+    def test_run_with_no_color_key_is_unchanged(self):
+        # Backward-compat: a run carrying no color token is left uncolored even when
+        # the profile HAS a palette (no token -> no per-run color).
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "plain"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            runs = [r for r in self._para_runs(out) if r.text]
+            self.assertEqual({r.font.color.type for r in runs}, {None})
+
+    def test_colored_hyperlink_run_carries_the_color(self):
+        # A safe-url hyperlink run is raw XML; the resolved token color is injected
+        # as w:color on its rPr (theme token -> w:themeColor).
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "link",
+                                "link": "https://example.com",
+                                "color": "accent1",
+                            }
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            doc = Document(out)
+            colors = doc.element.findall(f".//{{{_W_NS}}}hyperlink//{{{_W_NS}}}color")
+            self.assertTrue(colors)
+            self.assertEqual(colors[0].get(f"{{{_W_NS}}}themeColor"), "accent1")
+
+    def test_colored_hex_hyperlink_run_carries_the_hex(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"brand.primary": _palette_entry("hex", "1F4E79")})
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "link",
+                                "link": "https://example.com",
+                                "color": "brand.primary",
+                            }
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            doc = Document(out)
+            colors = doc.element.findall(f".//{{{_W_NS}}}hyperlink//{{{_W_NS}}}color")
+            self.assertTrue(colors)
+            self.assertEqual(colors[0].get(f"{{{_W_NS}}}val"), "1F4E79")
+
+    def test_colored_underlined_hyperlink_color_precedes_u_in_rpr(self):
+        # Regression: w:color must be inserted at the schema-correct CT_RPr position
+        # (before w:u / w:sz / w:vertAlign), NOT appended last - else an underlined,
+        # colored safe-url link emits non-conformant OOXML run-property child order.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "link",
+                                "link": "https://example.com",
+                                "color": "accent1",
+                                "u": True,
+                            }
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            doc = Document(out)
+            rpr = doc.element.find(
+                f".//{{{_W_NS}}}hyperlink/{{{_W_NS}}}r/{{{_W_NS}}}rPr"
+            )
+            self.assertIsNotNone(rpr)
+            order = [c.tag.split("}")[1] for c in rpr]
+            self.assertIn("color", order)
+            self.assertIn("u", order)
+            self.assertLess(order.index("color"), order.index("u"))
+
+    def test_run_color_token_is_byte_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out1 = Path(td) / "out1.docx"
+            out2 = Path(td) / "out2.docx"
+            prof = _palette_profile({"accent1": _palette_entry("theme", "accent1")})
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(runs=[{"t": "a", "color": "accent1"}]),
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "b",
+                                "link": "https://example.com",
+                                "color": "accent1",
+                            }
+                        ]
+                    ),
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out1)
+            docx_generate.generate(prof, shell, idoc, out2)
+            self.assertEqual(out1.read_bytes(), out2.read_bytes())
+
+
+class ThemeColorHexFallbackTest(unittest.TestCase):
+    """A theme-token color carries the resolved hex in w:color@w:val ALONGSIDE the
+    themeColor, so renderers that ignore a run themeColor (headless LibreOffice) still
+    show the brand color; Word still uses the live themeColor."""
+
+    def _prof(self, *, with_colors=True):
+        theme = {
+            "colors": {"accent1": {"hex": "4F81BD"}} if with_colors else {},
+            "fonts": {},
+            "palette": {"accent1": {"ref": {"kind": "theme", "theme": "accent1"}}},
+        }
+        return _profile(theme=theme)
+
+    def test_resolve_color_enriches_theme_token_with_hex(self):
+        op = ProfileResolver(self._prof()).resolve_color("accent1")
+        self.assertEqual(op, {"kind": "theme", "theme": "accent1", "hex": "4F81BD"})
+
+    def test_resolve_color_theme_without_theme_colors_has_no_hex(self):
+        op = ProfileResolver(self._prof(with_colors=False)).resolve_color("accent1")
+        self.assertEqual(op, {"kind": "theme", "theme": "accent1"})
+
+    def test_applied_theme_color_run_carries_val_and_themecolor(self):
+        import re
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "branded", "color": "accent1"}])]
+            )
+            docx_generate.generate(self._prof(), shell, idoc, out)
+            xml = (
+                zipfile.ZipFile(out)
+                .read("word/document.xml")
+                .decode("utf-8", "replace")
+            )
+            m = re.search(r'<w:color\b[^>]*w:themeColor="accent1"[^>]*/>', xml)
+            self.assertIsNotNone(m, "expected a themeColor=accent1 run color")
+            self.assertIn('w:val="4F81BD"', m.group(0))
+
+
+class HyperlinkRunAppearanceTest(unittest.TestCase):
+    """A hyperlink run (raw w:r under w:hyperlink, not in para.runs) receives the
+    SAME captured appearance as the surrounding body runs, so a link does not render
+    smaller / unfonted than the text around it."""
+
+    def test_hyperlink_run_gets_body_font_and_size(self):
+        import re
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {"body": {"latin": "Roboto", "size_hp": 32}},
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {"t": "see "},
+                            {"t": "the site", "link": "https://example.com"},
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            xml = (
+                zipfile.ZipFile(out)
+                .read("word/document.xml")
+                .decode("utf-8", "replace")
+            )
+            link = re.search(r"<w:hyperlink\b.*?</w:hyperlink>", xml, re.S)
+            self.assertIsNotNone(link, "expected a hyperlink in the output")
+            block = link.group(0)
+            self.assertIn('<w:sz w:val="32"/>', block)  # body 16pt reached the link
+            self.assertIn('w:ascii="Roboto"', block)  # body font reached the link
+
+
+def _doc_xml(out) -> str:
+    import zipfile
+
+    return zipfile.ZipFile(out).read("word/document.xml").decode("utf-8", "replace")
+
+
+class SlotTokenAndCompositionTest(unittest.TestCase):
+    """The review-confirmed apply/verify asymmetry + three-axis composition.
+
+    A clrScheme-slot color token (dk1/lt1/hlink) has no WordprocessingML themeColor
+    member, but the resolver enriches it with the concrete hex and apply realizes it
+    via that hex (RGB) instead of dropping it to inherited. Plus: a single run can
+    carry token-color + body-size + body-font together (links included)."""
+
+    def _prof(self, token, hexv):
+        return _profile(
+            theme={
+                "colors": {token: {"hex": hexv}},
+                "fonts": {"body": {"latin": "Roboto", "size_hp": 22}},
+                "palette": {token: {"ref": {"kind": "theme", "theme": token}}},
+            }
+        )
+
+    def test_clrscheme_slot_token_applies_via_hex(self):
+        for token, hexv in (("dk1", "123456"), ("hlink", "0563C1")):
+            with self.subTest(token=token), tempfile.TemporaryDirectory() as td:
+                shell = _shell(Path(td))
+                out = Path(td) / "o.docx"
+                idoc = ir.IntermediateDocument(
+                    blocks=[ir.Paragraph(runs=[{"t": "x", "color": token}])]
+                )
+                docx_generate.generate(self._prof(token, hexv), shell, idoc, out)
+                colored = [
+                    r
+                    for p in Document(out).paragraphs
+                    for r in p.runs
+                    if r.font.color.type is not None
+                ]
+                self.assertTrue(colored, f"{token} should apply, not inherit")
+                self.assertEqual({str(r.font.color.rgb) for r in colored}, {hexv})
+
+    def test_three_axes_compose_on_one_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "o.docx"
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "x", "color": "accent1"}])]
+            )
+            docx_generate.generate(self._prof("accent1", "4F81BD"), shell, idoc, out)
+            runs = [
+                r
+                for p in Document(out).paragraphs
+                for r in p.runs
+                if (r.text or "").strip()
+            ]
+            self.assertTrue(runs)
+            r0 = runs[0]
+            self.assertEqual(r0.font.name, "Roboto")  # body font
+            self.assertEqual(int(r0.font.size.pt * 2), 22)  # body size
+            self.assertEqual(str(r0.font.color.rgb), "4F81BD")  # token color
+
+    def test_colored_link_gets_font_size_color_together(self):
+        import re
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "o.docx"
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "link",
+                                "link": "https://example.com",
+                                "color": "accent1",
+                            }
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(self._prof("accent1", "4F81BD"), shell, idoc, out)
+            block = re.search(
+                r"<w:hyperlink\b.*?</w:hyperlink>", _doc_xml(out), re.S
+            ).group(0)
+            self.assertIn('w:ascii="Roboto"', block)  # font
+            self.assertIn('<w:sz w:val="22"/>', block)  # size
+            self.assertIn('w:themeColor="accent1"', block)  # theme color
+            self.assertIn('w:val="4F81BD"', block)  # + hex fallback for LibreOffice
+
+    def test_link_theme_color_without_theme_colors_has_no_val(self):
+        import re
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "o.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {},
+                    "palette": {
+                        "accent1": {"ref": {"kind": "theme", "theme": "accent1"}}
+                    },
+                }
+            )
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Paragraph(
+                        runs=[
+                            {
+                                "t": "link",
+                                "link": "https://example.com",
+                                "color": "accent1",
+                            }
+                        ]
+                    )
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out)
+            block = re.search(
+                r"<w:hyperlink\b.*?</w:hyperlink>", _doc_xml(out), re.S
+            ).group(0)
+            color_el = re.search(r"<w:color\b[^>]*/>", block).group(0)
+            self.assertIn('w:themeColor="accent1"', color_el)
+            self.assertNotIn(
+                "w:val=", color_el
+            )  # no theme.colors hex -> themeColor only
 
 
 if __name__ == "__main__":

@@ -6,19 +6,58 @@ All notable changes to BrandDocs are documented in this file.
 
 ### Added
 
-- **Brand typography capture (font family).** Extraction now captures the
-  template's dominant DIRECT run font - the real visible font a designed template
-  often applies per-run (e.g. Roboto / Montserrat) rather than via the named styles
-  or theme - into the reserved `role.appearance` field and an additive
-  `theme.fonts.body`. Generation applies it as direct run formatting through the
-  resolver, so a generated document renders in the template's real font instead of
-  falling back to the `docDefaults` font (typically Arial). Deterministic and
-  additive: a template with no dominant direct font, and every pre-capture profile,
-  behaves exactly as before. The brand guarantee holds - a captured/applied font is
-  re-validated against the shell's available fonts (fontTable + theme) by the new
-  `appearance_targets_exist` check (fail-closed ERROR otherwise). See
-  [ROADMAP](documentation/ROADMAP.md) section 1; colors, sizes, per-word accents,
-  and cover-layout reconstruction remain future scope.
+- **Brand typography capture (font family + size + color).** Extraction now captures
+  the template's dominant DIRECT run typography - the real visible font, font size
+  and run color a designed template applies per-run (e.g. Roboto 16pt) rather than
+  via the named styles or theme - into the reserved `role.appearance` field and the
+  additive `theme.fonts.body` (font/size) and `theme.text.body` (color). Generation
+  applies all three as direct run formatting through the resolver (paragraphs, list
+  items, captions, quotes, callouts, table cells, and hyperlink runs), so a generated
+  document renders in the template's real font, size and color instead of falling
+  back to the `docDefaults` (typically Arial 11pt black). `_extract_theme` also reads
+  the real `theme1.xml` major/minor fonts and `docDefaults`.
+  - **Universal and deterministic.** Each axis is captured by dominant sampling over
+    ALL runs (a run with no explicit value votes "inherit"), so a value is applied
+    only when it dominates the whole document - an accent color present on a few runs
+    never becomes the body color. Nothing is hardcoded to any template; a document
+    with no dominant value (and every pre-capture profile) behaves exactly as before.
+  - **Brand guarantee, fail-closed.** Every applied font/size/color is re-validated
+    against what the shell proves it contains (`appearance_targets_exist`): fonts vs
+    the fontTable + theme, sizes vs the template's own `w:sz` values, colors vs the
+    theme palette + the template's own `w:color` values. The body size/color default
+    never flows onto heading roles (their style's intrinsic size/color is preserved).
+  - Deferred (see [ROADMAP](documentation/ROADMAP.md) section 1): per-word accents,
+    cover-layout reconstruction, and heading typography when the template fakes
+    headings in the body style.
+- **Model-driven brand color (run color palette tokens).** The profile now carries a
+  `theme.palette` of the template's brand colors (theme slots like `accent1`, plus
+  off-theme `hex:RRGGBB`) with usage provenance; an IntermediateDocument run can carry
+  a semantic `color` token (a palette key, never a literal hex) that the resolver maps
+  to the brand color and the generator applies - rendering a theme color as
+  `w:color@w:val=<hex>` + `w:themeColor=<slot>` so it shows in both LibreOffice and
+  Word. The model NAMES each color's purpose via `comprehension.palette_annotations`;
+  it never authors a color (fail-closed: a token into an empty/absent palette errors).
+- **Caption-index regeneration (list of tables / figures).** A kept caption index
+  (`TOC \c "<seq>"`) is now repopulated from the new content: each captioned table or
+  figure emits a real Word `SEQ` field, and the index's visible cache is rebuilt from
+  the emitted captions (so a headless render shows the new entries, not the template's
+  stale ones). The model maps a caption kind to its index via the new closed
+  `comprehension.conventions.indexes[*].caption_target` (`table|figure`); brand- and
+  language-agnostic (the seq label is the template's own, read from the profile).
+- **Cover fidelity for content-control covers.** A cover content control bound to a
+  core property (e.g. the subject repeated in the page header) now has its cached run
+  text refreshed across the body and every header/footer, so a headless render shows
+  the filled value, not the template prompt. The cover role-style re-assertion is
+  gated to bare placeholder controls, so a real author-formatted slot keeps its own
+  formatting (a builtin `Subtitle` whose color is a near-white tint no longer blanks a
+  filled cover subtitle).
+
+### Fixed
+
+- Colored hyperlink runs now write `w:color` at the schema-correct `CT_RPr` position
+  (before `w:u` / `w:sz` / `w:vertAlign`) instead of appending it last, so an
+  underlined colored link is conformant OOXML; a theme-token link with no resolved hex
+  emits `themeColor` only (no stray `w:val="000000"` that would paint it black).
 
 ## [0.6.2] - 2026-06-09
 

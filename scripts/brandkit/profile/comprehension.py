@@ -74,6 +74,7 @@ def surface_inventories(profile: dict) -> dict:
           "fields":        [ {"id": <index_ref>, ...}, ... ],
           "regions":       [ {"id": <region_ref>, ...}, ... ],
           "roles":         [ <role_id>, ... ],
+          "palette":       [ <palette_key>, ... ],
         }
 
     ``cover_anchors`` / ``fields`` / ``regions`` are read from
@@ -81,6 +82,10 @@ def surface_inventories(profile: dict) -> dict:
     legal (for example XLSX has no TOC-style field code), but refs into an empty
     inventory have nothing to bind to and are fail-closed at QA time.
     ``roles`` is the concrete role-id list (``_index`` order if present).
+    ``palette`` is the template-derived ``theme.palette`` key list (a theme slot
+    like ``accent1`` or ``hex:RRGGBB``); a ``palette_annotations`` key binds to it
+    fail-closed, so the model can NAME only a color the deterministic capture
+    actually observed. Sorted for a stable surfaced order.
 
     This is the ONLY place the inventory shape is defined; the ``comprehend-input``
     verb and ``comprehension_targets_exist`` both call it so they cannot drift.
@@ -90,11 +95,13 @@ def surface_inventories(profile: dict) -> dict:
     sub = surface.get(kind) if isinstance(surface, dict) and kind else {}
     if not isinstance(sub, dict):
         sub = {}
+    palette = (profile.get("theme") or {}).get("palette") or {}
     return {
         "cover_anchors": _entries_with_ids(sub.get("cover_anchors")),
         "fields": _entries_with_ids(sub.get("fields")),
         "regions": _entries_with_ids(sub.get("regions")),
         "roles": list(schema.list_role_ids(profile)),
+        "palette": sorted(palette) if isinstance(palette, dict) else [],
     }
 
 
@@ -120,10 +127,43 @@ def comprehend_input_bundle(profile: dict, *, excerpt_chars: int = 8000) -> dict
         # Advisory hints of recurring structures the model MAY turn into reusable
         # fragments (proposed back via comprehension.fragments). May be empty.
         "fragment_candidates": _fragment_candidates(kind, catalog),
+        # The brand PALETTE the model NAMES (model-driven color): each entry's
+        # captured ``ref`` / ``provenance`` / ``frequency`` (names null in the
+        # deterministic path). The model writes back ``palette_annotations`` keyed by
+        # these palette ids; it NEVER authors a color. May be empty.
+        "palette": _palette_facts(profile),
     }
 
     excerpt = _collect_excerpt(profile, catalog, excerpt_chars)
     return {"facts": facts, "excerpt": excerpt}
+
+
+def _palette_facts(profile: dict) -> list[dict]:
+    """The brand palette the model reasons over to NAME each color (model-driven
+    color). Each fact is the captured ``{key, ref, provenance, frequency, name}`` -
+    ``name`` surfaced as-is (null in the deterministic path) so the model sees what
+    is still unnamed. The model NEVER receives a hex to author; it writes back only
+    ``palette_annotations`` keyed by ``key``. Sorted by ``key`` (deterministic);
+    empty when the template carried no color.
+    """
+    palette = (profile.get("theme") or {}).get("palette") or {}
+    if not isinstance(palette, dict):
+        return []
+    out: list[dict] = []
+    for key in sorted(palette):
+        entry = palette[key]
+        if not isinstance(entry, dict):
+            continue
+        out.append(
+            {
+                "key": key,
+                "ref": entry.get("ref"),
+                "provenance": entry.get("provenance") or [],
+                "frequency": entry.get("frequency"),
+                "name": entry.get("name"),
+            }
+        )
+    return out
 
 
 def _catalog_styles(catalog: Any) -> dict:
@@ -303,6 +343,7 @@ def check_membership(profile: dict, comp: dict) -> list[str]:
     field_ids = {e["id"] for e in inv["fields"]}
     region_ids = {e["id"] for e in inv["regions"]}
     role_ids = set(inv["roles"])
+    palette_ids = set(inv["palette"])
 
     problems: list[str] = []
 
@@ -363,6 +404,16 @@ def check_membership(profile: dict, comp: dict) -> list[str]:
             problems.append(
                 f"comprehension.role_annotations: role id {rid!r} not in roles "
                 f"{sorted(role_ids)}"
+            )
+
+    # (e) palette_annotations keys ∈ the surfaced palette inventory (FAIL-CLOSED on
+    # empty, same rule as anchor/index/region): the model can NAME only a color the
+    # deterministic capture actually observed, never invent a palette key.
+    for key in comp.get("palette_annotations") or {}:
+        if key not in palette_ids:
+            problems.append(
+                f"comprehension.palette_annotations: palette key {key!r} not in "
+                f"surfaced palette inventory {sorted(palette_ids)}"
             )
 
     return problems
@@ -652,6 +703,7 @@ def merge(
     _derive_role_usage(profile, canonical)
     _derive_skeleton_attrs(profile, canonical)
     _derive_anchors(profile, canonical)
+    _derive_palette_annotations(profile, canonical)
 
     # 4b) Derive the reusable-fragment registries from the canonical fragments.
     # comprehend OWNS components/sections: they are rebuilt deterministically from
@@ -705,6 +757,14 @@ def _canonicalize(
         k: dict(annotations[k])
         for k in sorted(annotations)
         if isinstance(annotations.get(k), dict)
+    }
+
+    # palette_annotations: sorted by palette key (the model NAMES a captured color).
+    palette_ann = comp.get("palette_annotations") or {}
+    out["palette_annotations"] = {
+        k: dict(palette_ann[k])
+        for k in sorted(palette_ann)
+        if isinstance(palette_ann.get(k), dict)
     }
 
     # demo_classification.regions: sorted by region_ref.
@@ -770,6 +830,28 @@ def _derive_role_usage(profile: dict, comp: dict) -> None:
             usage["purpose"] = ann["purpose"]
         if ann.get("generation_rules") is not None:
             usage["generation_rules"] = ann["generation_rules"]
+
+
+def _derive_palette_annotations(profile: dict, comp: dict) -> None:
+    """Mirror the model's palette NAMES onto ``theme.palette[key]`` (model-driven
+    color), exactly like :func:`_derive_role_usage` mirrors role annotations.
+
+    Only the advisory free-text fields (``name`` / ``purpose`` / ``use_when`` /
+    ``semantic_role``) are copied onto the matching palette entry; the structural
+    ``ref`` / ``provenance`` / ``frequency`` are NEVER touched (they are the
+    deterministic capture's, and the model never authors a real color). A key with
+    no matching palette entry is skipped (membership already gated it fail-closed).
+    """
+    palette = (profile.get("theme") or {}).get("palette") or {}
+    if not isinstance(palette, dict):
+        return
+    for key, ann in (comp.get("palette_annotations") or {}).items():
+        entry = palette.get(key)
+        if not isinstance(entry, dict) or not isinstance(ann, dict):
+            continue
+        for field in schema.PALETTE_ANNOTATION_FIELDS:
+            if ann.get(field) is not None:
+                entry[field] = ann[field]
 
 
 def _derive_skeleton_attrs(profile: dict, comp: dict) -> None:

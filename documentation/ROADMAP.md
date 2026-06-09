@@ -15,13 +15,19 @@ refuses a profile that points at anything the template does not actually contain
 
 ## 1. Brand typography capture (direct-formatting -> role `appearance`)
 
-> **Status: v1 shipped (font family).** The capture/verify/apply pipeline below is
-> implemented for the FONT FAMILY: extraction records the dominant direct run font
-> into `role.appearance.font.latin` and `theme.fonts.body`, `verify` re-validates it
-> against the shell (`appearance_targets_exist`), and generation applies it as
-> direct run formatting through the resolver. Still future: **run colors**, **font
-> size**, **per-word accents**, and **cover-layout reconstruction** (the separate
-> `cover.kind = NONE` gap). The design below documents the full feature.
+> **Status: shipped (font family + size + color).** The capture/verify/apply
+> pipeline below is implemented for THREE independent axes - font family, font size,
+> and run color. Extraction records the dominant direct run value (sampled over ALL
+> runs, so a minority accent never wins) into `role.appearance` and the document
+> defaults `theme.fonts.body` (font/size) + `theme.text.body` (color); `verify`
+> re-validates each applied value against the shell (`appearance_targets_exist`:
+> fonts vs fontTable+theme, sizes vs the template's `w:sz` set, colors vs the theme
+> palette + the template's `w:color` set); and generation applies them as direct run
+> formatting through the resolver, with the body size/color default gated off heading
+> roles. Still future: **per-word accents**, **cover-layout reconstruction** (the
+> separate `cover.kind = NONE` gap), and **heading typography** when a template fakes
+> headings in the body style (route via `comprehension.role_annotations`). The design
+> below documents the full feature.
 
 ### Problem
 A generated document does not always match the template's **real visible
@@ -172,7 +178,70 @@ and confidence; they stay advisory until a threshold or an explicit accept
 
 ---
 
-## 3. Visual audit (salvaged future ideas)
+## 3. Interactive profile refinement from user feedback (human-in-the-loop)
+
+### Problem
+The Brand Profile only ever learns from what the engine can *measure*. After a
+generation, the engine cannot tell whether a heading that **should** be the brand
+teal came out black, whether a section it preserved is actually boilerplate the
+user wants dropped, or whether it misread *what an extracted element is for*. Those
+are qualitative judgements only the **user** can make. Today there is no moment in
+the workflow where the skill asks, and no channel for that answer to improve the
+profile, so the same off-brand deviation recurs on every future generation.
+
+### Proposed design (compatible)
+Add an explicit **ask-and-refine** step to the agent workflow, complementary to
+the machine-driven feedback loop in section 2 (which learns from QA findings):
+
+1. **Ask (agent guidance, `SKILL.md`).** After returning the generated file and the
+   QA summary, the agent asks the user a targeted question: *"Does this match your
+   template? Is anything off-brand or deviating from the original - a heading that
+   should be colored, a section that should not repeat, an element whose purpose I
+   read wrong?"* The question is grounded in what was actually extracted (it can
+   name the roles / palette entries / sections it used), so the user reacts to
+   concrete choices rather than a blank prompt.
+
+2. **Refine (model proposes).** The user's qualitative answer is turned by the model
+   into structured refinements written **through the same fail-closed channels that
+   already exist** - `comprehension.role_annotations` / `palette_annotations` /
+   cover-slot and index conventions (the *purpose* of each extracted element), plus
+   the shell-bound lessons/overrides registry from section 2 (a re-point within
+   artifacts the shell already defines). The model can sharpen *what an element is
+   for* and re-point within shell-backed artifacts; it can **never** invent a style,
+   font, color, or layout the template does not contain.
+
+3. **Confirm and freeze (deterministic disposes).** The proposed profile refinement
+   is shown as a diff, the user confirms (mirroring `verify --accept`), and it is
+   frozen to the shell (`source_shell_sha256`, like comprehension). `verify`
+   re-validates every refinement against the shell, so a confirmed-but-impossible
+   change is still refused fail-closed.
+
+### Why it matters
+This is how the skill **progressively learns to manage the extracted elements and
+their scope**: each round enriches the comprehension's understanding of what each
+role / color / section is *for*, so subsequent generations are more faithful with
+less correction. Section 2 learns from what the machine can check; this learns from
+what only the user can judge - together they close the loop from both sides.
+
+### Compatibility notes
+- Reuses the comprehension writer (the one model-writable, fail-closed, shell-frozen
+  block), `role_annotations` / `palette_annotations`, and the section-2 lessons
+  registry. No new brand-value channel: the model annotates purpose and re-points
+  within shell-backed artifacts only.
+- Fully optional and backward compatible: with no feedback the profile is unchanged
+  and generation behaves exactly as today.
+- Off-brand stays impossible by construction: the user's confirmation never lets a
+  refinement reference an artifact the shell lacks - `verify` is still the floor.
+
+### Risk to manage
+A confident-but-wrong user answer (or an over-eager model interpretation) could
+entrench a bad refinement. Mitigation: always present the change as a confirmable
+diff, keep refinements advisory until accepted, and let a later re-extract reset
+them (they are shell-bound).
+
+---
+
+## 4. Visual audit (salvaged future ideas)
 
 Carried over from the now-removed `VISUAL_AUDIT_IMPROVEMENTS.md` (most of which
 shipped: LibreOffice+Poppler+Pillow path, doctor preflight, PyMuPDF fallback,

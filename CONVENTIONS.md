@@ -243,9 +243,17 @@ Used by **docx** and **pptx**. (xlsx uses a separate **GridDocument**.) The auth
 supplies an ordered list of typed blocks carrying **intent**, never presentation.
 
 ### Inline rich runs
-A run is `{"t": str, "b"?, "i"?, "u"?, "strike"?, "code"?, "sup"?, "sub"?, "link"?}`.
-`"b"/"i"/…` are booleans; `"link"` is a URL string. A bare `"text": "..."` on a block
-is **sugar** normalized to `[{"t": "..."}]` on parse.
+A run is `{"t": str, "b"?, "i"?, "u"?, "strike"?, "code"?, "sup"?, "sub"?, "link"?,
+"color"?}`. `"b"/"i"/…` are booleans; `"link"` is a URL string; `"color"` is an
+optional **palette token** (model-driven color, see §13). A bare `"text": "..."` on a
+block is **sugar** normalized to `[{"t": "..."}]` on parse.
+
+`"color"` is a verbatim key of `theme.palette` (a theme slot like `accent1`, or
+`hex:RRGGBB`) - **never a literal color**. `normalize_runs` drops any hex-shaped or
+`#`-bearing value structurally, so a literal color can never enter the
+IntermediateDocument through a run (the one hard rule, enforced by construction).
+The resolver maps the token to the captured color `ref`; an unknown token leaves the
+run inherited (`color_token_unresolved` INFO).
 
 ### Block catalog (16 flow types + the cover)
 
@@ -492,7 +500,67 @@ every format.
 
 ---
 
-## 13. Licensing
+## 13. Model-driven color (`theme.palette` + `palette_annotations`)
+
+Color follows the same **"the model proposes, the deterministic disposes"** pattern
+as comprehension, layered additively on the deterministic appearance capture
+(`theme.text.body.color`, `role.appearance.color` - both untouched and
+byte-identical for existing profiles). Three pieces:
+
+### `theme.palette` (deterministic UNDERSTAND - additive, optional)
+A template-derived map keyed by a **theme slot token** (`accent1`..`accent6` /
+`dk1` / `dk2` / `lt1` / `lt2` / `hlink` / `folHlink`) or `hex:RRGGBB` for an
+observed off-theme run color. Each entry:
+
+```jsonc
+"theme": { "palette": {
+  "<slot or hex:RRGGBB>": {
+    "ref": { "kind": "theme", "theme": "accent1" },   // OR { "kind": "hex", "hex": "RRGGBB" }
+    "provenance": [ { "where": "<closed>", "detail": "<str>" } ],  // sorted by (where, detail)
+    "frequency": "dominant" | "accent" | "rare",      // COARSE bucket, never raw counts
+    "name": null, "purpose": null, "use_when": null   // model-only; null in the deterministic path
+  } } }
+```
+
+The closed provenance `where` vocabulary is **exactly**
+`palette_role | role.appearance | run.color | link.color` (`palette_role` is the
+only NON-authoritative source). Capture is **model-free, deterministic, and
+byte-identical on re-extract**; a template with no observed color leaves an empty
+`{}` palette. The schema validates the shape only (`_validate_palette`); there is
+**no `SCHEMA_VERSION` bump** (it is an additive optional key, its documented default
+`{}`). docx captures the full palette (theme slots + run colors with a low-floor
+accent aggregation + per-role + link colors); pptx/xlsx seed a minimal palette from
+their parsed theme slots so the surfaced inventory is non-empty (format-uniform).
+
+### `comprehension.palette_annotations` (model-driven, derived sink)
+The model **NAMES** each palette color, keyed by its palette id:
+
+```jsonc
+"comprehension": { "palette_annotations": {
+  "<palette_key>": { "name": "...", "purpose": "...", "use_when": "...",
+                     "semantic_role": "..." } } }
+```
+
+Every key is **fail-closed** against the surfaced `palette` inventory (a key into an
+empty/absent inventory is an **ERROR**, the same rule as anchor/index/region refs),
+enforced by `check_membership` and the gate's `check_color_token_targets` (wired
+right after `check_comprehension_targets`). On a clean merge `_derive_palette_annotations`
+mirrors `name`/`purpose`/`use_when`/`semantic_role` onto `theme.palette[key]`. The
+model **NEVER** writes `ref`/a color - only names.
+
+### The run `color` token (APPLY)
+A run's optional `color` (§6) is a palette token the resolver maps to
+`theme.palette[token]['ref']` and applies. Every applied palette `ref` is
+re-validated against the shell **fail-closed** by `check_appearance_targets` (hex
+vs the palette UNION the observed `w:color`; theme token vs the parsed `clrScheme`
+slot). Guarantees: no literal hex in any IDoc/writer (structural rejection in
+`normalize_runs`); the model can NAME but never author a real color; the
+deterministic no-model path is byte-identical; re-runs are idempotent; everything is
+template-derived (no hardcoded colors/names/language).
+
+---
+
+## 14. Licensing
 
 - brand-docs original code: **MIT** (every engine file carries an
   `SPDX-License-Identifier: MIT` header).

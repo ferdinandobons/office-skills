@@ -508,6 +508,117 @@ class FragmentPopulationTest(unittest.TestCase):
         self.assertTrue(any("pre" in p for p in res.problems), res.problems)
 
 
+def _palette_entry(theme_slot):
+    """The deterministic palette entry shape (model fields null)."""
+    return {
+        "ref": {"kind": "theme", "theme": theme_slot},
+        "provenance": [],
+        "frequency": "rare",
+        "name": None,
+        "purpose": None,
+        "use_when": None,
+    }
+
+
+class PaletteAnnotationsTest(unittest.TestCase):
+    """Model-driven color: the comprehension surfaces a 'palette' inventory, binds
+    palette_annotations fail-closed against it, and on a clean merge mirrors the
+    model's NAMES onto theme.palette without ever touching the captured ref."""
+
+    def _profile_with_palette(self):
+        prof = _docx_profile_with_inventory()
+        prof["theme"]["palette"] = {
+            "accent1": _palette_entry("accent1"),
+            "dk1": _palette_entry("dk1"),
+        }
+        return prof
+
+    def test_palette_inventory_is_surfaced(self):
+        prof = self._profile_with_palette()
+        inv = comp_mod.surface_inventories(prof)
+        self.assertEqual(inv["palette"], ["accent1", "dk1"])
+
+    def test_palette_facts_in_bundle_carry_ref_and_null_name(self):
+        prof = self._profile_with_palette()
+        bundle = comp_mod.comprehend_input_bundle(prof)
+        palette_facts = bundle["facts"]["palette"]
+        self.assertEqual([p["key"] for p in palette_facts], ["accent1", "dk1"])
+        self.assertEqual(palette_facts[0]["ref"], {"kind": "theme", "theme": "accent1"})
+        # The model never receives a name in the deterministic path.
+        self.assertIsNone(palette_facts[0]["name"])
+
+    def test_annotation_binds_and_mirrors_onto_palette(self):
+        prof = self._profile_with_palette()
+        comp = {
+            "palette_annotations": {
+                "accent1": {
+                    "name": "primary brand",
+                    "purpose": "headings",
+                    "use_when": "section titles",
+                    "semantic_role": "accent",
+                }
+            }
+        }
+        res = comp_mod.merge(prof, comp)
+        self.assertTrue(res.ok, res.problems)
+        entry = prof["theme"]["palette"]["accent1"]
+        # Names mirrored onto the deterministic entry...
+        self.assertEqual(entry["name"], "primary brand")
+        self.assertEqual(entry["purpose"], "headings")
+        self.assertEqual(entry["use_when"], "section titles")
+        self.assertEqual(entry["semantic_role"], "accent")
+        # ...without ever touching the captured ref.
+        self.assertEqual(entry["ref"], {"kind": "theme", "theme": "accent1"})
+        # The canonical comprehension also carries the annotation.
+        self.assertIn("accent1", prof["comprehension"]["palette_annotations"])
+
+    def test_annotation_key_absent_from_palette_is_rejected(self):
+        prof = self._profile_with_palette()
+        res = comp_mod.merge(
+            prof, {"palette_annotations": {"accent9": {"name": "ghost"}}}
+        )
+        self.assertFalse(res.ok)
+        self.assertEqual(prof["comprehension"]["status"], "rejected")
+        self.assertTrue(
+            any("accent9" in p and "palette" in p for p in res.problems), res.problems
+        )
+
+    def test_annotation_into_empty_palette_is_error_not_skipped(self):
+        # Fail-closed on empty, same rule as anchor/index/region.
+        prof = _docx_profile_with_inventory()  # no theme.palette set -> empty
+        res = comp_mod.merge(prof, {"palette_annotations": {"accent1": {"name": "x"}}})
+        self.assertFalse(res.ok)
+        self.assertTrue(
+            any("accent1" in p and "palette" in p for p in res.problems), res.problems
+        )
+
+    def test_palette_annotation_merge_is_idempotent(self):
+        prof_a = self._profile_with_palette()
+        prof_b = self._profile_with_palette()
+        comp = {"palette_annotations": {"accent1": {"name": "primary"}}}
+        comp_mod.merge(prof_a, dict(comp))
+        comp_mod.merge(prof_b, dict(comp))
+        self.assertEqual(
+            json.dumps(prof_a["comprehension"], sort_keys=True),
+            json.dumps(prof_b["comprehension"], sort_keys=True),
+        )
+        self.assertEqual(
+            json.dumps(prof_a["theme"]["palette"], sort_keys=True),
+            json.dumps(prof_b["theme"]["palette"], sort_keys=True),
+        )
+
+    def test_empty_comprehension_has_palette_annotations_default(self):
+        comp = schema.empty_comprehension()
+        self.assertEqual(comp["palette_annotations"], {})
+
+    def test_bad_annotation_shape_is_reported(self):
+        prof = self._profile_with_palette()
+        prof["comprehension"]["status"] = "present"
+        prof["comprehension"]["palette_annotations"] = {"accent1": {"name": 123}}
+        problems = schema.validate(prof)
+        self.assertTrue(any("palette_annotations" in p for p in problems), problems)
+
+
 class CliComprehendTest(unittest.TestCase):
     def test_comprehend_input_and_comprehend_roundtrip(self):
         import os

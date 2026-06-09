@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pptx import Presentation
 
+from brandkit.common import color
 from brandkit.formats import catalog
 from brandkit.formats.pptx import structure
 from brandkit.ooxml import pack
@@ -60,7 +61,7 @@ def extract(
             "filename": template_path.name,
             "sha256": store.sha256_file(template_path),
         },
-        theme=_theme(),
+        theme=_theme(template_path),
         roles=roles,
         surface=surface,
         structure=skeleton,
@@ -302,9 +303,15 @@ def _capabilities() -> dict:
     }
 
 
-def _theme() -> dict:
-    return {
-        "colors": {},
+def _theme(path: Path) -> dict:
+    """The pptx theme block: the parsed ``ppt/theme/theme1.xml`` colors plus a
+    MINIMAL deterministic ``palette`` seeded from those slots (model-driven color
+    parity). The palette gives the surfaced ``palette`` inventory a non-empty set so
+    a ``palette_annotations`` key binds (it is not fail-closed on empty for pptx).
+    A missing theme part is swallowed (KeyError) - the rest of the contract stands.
+    """
+    theme = {
+        "colors": _theme_colors(path),
         "palette_roles": {"primary": {"theme": "accent1"}, "text": {"theme": "dk1"}},
         "fonts": {
             "major": {"latin": None, "fallback": "Arial"},
@@ -312,6 +319,22 @@ def _theme() -> dict:
         },
         "embedded_fonts": [],
     }
+    color.seed_theme_palette(theme)
+    return theme
+
+
+def _theme_colors(path: Path) -> dict:
+    """Parse ``ppt/theme/theme1.xml`` into the ``{slot: {"hex": ...}}`` colors map.
+
+    A missing theme part is legitimate (KeyError) and yields an empty map; any
+    other parse error propagates (a corrupt theme must not silently blank the
+    palette), mirroring the docx extractor's contract.
+    """
+    try:
+        parsed = color.parse_theme_colors(pack.read_part(path, "ppt/theme/theme1.xml"))
+    except KeyError:
+        return {}
+    return {slot: {"hex": hex_value} for slot, hex_value in parsed.items()}
 
 
 def _profile_md(profile: dict) -> str:

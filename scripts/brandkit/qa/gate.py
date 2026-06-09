@@ -95,6 +95,11 @@ def run_qa(
     # inventories. No-ops when comprehension is absent (model-free CI path,
     # pptx/xlsx), so it is always safe to run unconditionally here.
     findings = findings + checks_deterministic.check_comprehension_targets(profile)
+    # Fail-closed COLOR-token membership (sibling of comprehension targets): every
+    # palette color token the comprehension/IDoc references must be a verbatim key
+    # of theme.palette. No-ops when comprehension is absent, so the model-free CI
+    # path and pre-palette profiles are unaffected.
+    findings = findings + checks_deterministic.check_color_token_targets(profile)
     if extra_findings:
         findings = findings + list(extra_findings)
 

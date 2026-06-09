@@ -2,8 +2,11 @@
 """Text utilities: rich-run helpers, markdown-literal detection, slugs, and the
 multilingual name-token lexicon used by role inference.
 
-This module is intentionally dependency-free (stdlib only) so every layer of the
-engine can import it without pulling in lxml / python-docx.
+This module pulls in NO heavy OOXML stack (no lxml / python-docx) so every layer
+of the engine can import it cheaply. It does lean on the two equally light pure-
+Python siblings ``brandkit.common.color`` and ``brandkit.profile.schema`` for the
+run color-TOKEN validator (the hex-rejection rule), both of which are themselves
+lxml/python-docx-free at import.
 
 Four concerns:
 
@@ -34,6 +37,9 @@ import re
 import unicodedata
 from typing import Iterable, Optional, Union
 
+from brandkit.common import color as colorutil
+from brandkit.profile import schema
+
 # A canonical inline run. Only "t" is required.
 Run = dict
 RunInput = Union[str, dict, Iterable[dict], None]
@@ -45,6 +51,35 @@ RunInput = Union[str, dict, Iterable[dict], None]
 # The boolean toggle keys a run may carry, plus the string "link" key.
 RUN_TOGGLE_KEYS: tuple[str, ...] = ("b", "i", "u", "strike", "code", "sup", "sub")
 RUN_STRING_KEYS: tuple[str, ...] = ("link",)
+# A run may ALSO carry a ``color`` palette TOKEN (model-driven color, the APPLY
+# half): a template-derived id (a theme slot like ``accent1``, or a comprehension-
+# named palette key) the resolver maps to ``theme.palette[token]['ref']``. It is a
+# TOKEN, never a literal color: :func:`is_valid_color_token` rejects any hex-shaped
+# string STRUCTURALLY, so a literal RRGGBB / ``#rgb`` can never enter the IDoc.
+RUN_PALETTE_KEYS: tuple[str, ...] = ("color",)
+
+
+def is_valid_color_token(value: object) -> bool:
+    """Return True if ``value`` is a syntactically valid run COLOR palette token.
+
+    A color token names a key into ``theme.palette`` (a theme slot like ``accent1``
+    or a comprehension-named id), so it must have the role-id/region-token shape
+    (dotted lowercase). It is NEVER a literal color: any hex-shaped string is
+    rejected structurally - anything :func:`colorutil.normalize_hex` would accept
+    (``abcdef`` / ``fff`` / any case) and anything containing ``#``. This is what
+    keeps a literal hex from ever reaching the writer through the IDoc; a rejected
+    value is dropped like a falsy toggle (the run is left to inherit its color)."""
+    if not isinstance(value, str) or not value:
+        return False
+    if "#" in value:
+        return False
+    if not (schema.is_valid_region_token(value) or schema.is_valid_role_id(value)):
+        return False
+    # Reject anything that PARSES as a hex color (e.g. the lowercase ``abcdef`` that
+    # the role-id regex would otherwise accept), so no literal color slips through.
+    if colorutil.is_hex(value):
+        return False
+    return True
 
 
 def normalize_runs(value: RunInput, *, text: Optional[str] = None) -> list[Run]:
@@ -58,8 +93,11 @@ def normalize_runs(value: RunInput, *, text: Optional[str] = None) -> list[Run]:
         ``[{"t": text}]``.
       - everything falsy -> ``[]``.
 
-    Each produced run keeps only recognised keys (``t`` + the toggle/link keys),
-    drops falsy toggles, and guarantees ``t`` is a ``str``.
+    Each produced run keeps only recognised keys (``t`` + the toggle/link keys +
+    a valid ``color`` palette token), drops falsy toggles, and guarantees ``t`` is
+    a ``str``. A ``color`` that is not a valid palette TOKEN (hex-shaped, ``#``-
+    bearing, or not a dotted-lowercase id) is DROPPED structurally - it never enters
+    the IDoc - so a literal color can never reach the writer through a run.
     """
     if value is None or value == "":
         if text:
@@ -85,6 +123,13 @@ def normalize_runs(value: RunInput, *, text: Optional[str] = None) -> list[Run]:
                 run[k] = True
         for k in RUN_STRING_KEYS:
             if r.get(k):
+                run[k] = str(r[k])
+        # A color palette TOKEN is preserved ONLY when it passes the structural
+        # token guard (dotted-lowercase id, never hex-shaped / ``#``-bearing); any
+        # other value is dropped like a falsy toggle so no literal color can enter
+        # the IDoc through a run.
+        for k in RUN_PALETTE_KEYS:
+            if is_valid_color_token(r.get(k)):
                 run[k] = str(r[k])
         out.append(run)
     return out

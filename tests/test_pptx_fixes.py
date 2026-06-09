@@ -99,7 +99,7 @@ def _extract_profile(template: Path, name: str = "deck") -> dict:
     profile = schema.build_envelope(
         "pptx",
         {"name": name, "display_name": name},
-        theme=px._theme(),
+        theme=px._theme(template),
         roles=roles,
         surface={
             "pptx": {
@@ -2106,6 +2106,37 @@ class FragmentFanoutBudgetTest(unittest.TestCase):
         idoc = parse_idoc({"blocks": [{"type": "component", "ref": "leaf"}] * 5})
         expanded = ir_components.expand_components(idoc, profile)
         self.assertEqual(len(expanded.blocks), 25)  # 5 x 5, well under the cap
+
+
+class PalettePptxParityTest(unittest.TestCase):
+    """Model-driven-color parity: the pptx extractor seeds a non-empty theme.palette
+    (from the deck's theme slots) so comprehend's surfaced 'palette' inventory is
+    non-empty and a palette_annotations key can bind (membership is fail-closed on an
+    empty inventory)."""
+
+    def test_pptx_extract_seeds_palette_and_surfaces_inventory(self):
+        import tempfile
+
+        from brandkit.profile import comprehension as comp
+
+        with tempfile.TemporaryDirectory() as td:
+            tpl = Path(td) / "t.pptx"
+            Presentation().save(tpl)
+            profile = _extract_profile(tpl)
+            palette = (profile.get("theme") or {}).get("palette") or {}
+            self.assertTrue(
+                palette, "pptx extract should seed a non-empty theme.palette"
+            )
+            inventory = comp.surface_inventories(profile).get("palette")
+            self.assertTrue(inventory, "the 'palette' inventory should be non-empty")
+            self.assertEqual(sorted(inventory), sorted(palette.keys()))
+            # The seeded refs must be schema-valid and well-formed theme refs (not
+            # merely present keys): a regression to empty/malformed refs fails here.
+            self.assertEqual(schema.validate(profile), [])
+            self.assertIn("accent1", palette)
+            self.assertEqual(
+                palette["accent1"]["ref"], {"kind": "theme", "theme": "accent1"}
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

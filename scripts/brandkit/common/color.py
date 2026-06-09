@@ -66,12 +66,64 @@ THEME_SLOTS: tuple[str, ...] = (
     "folHlink",
 )
 
+# Closed alias table: the WordprocessingML ``w:themeColor`` token namespace
+# (``MSO_THEME_COLOR.xml_value``: text1/text2/background1/background2/dark1/dark2/
+# light1/light2/accent1-6/hyperlink/followedHyperlink) -> the DrawingML ``clrScheme``
+# slot names :data:`THEME_SLOTS` is keyed on (dk1/lt1/dk2/lt2/accentN/hlink/folHlink).
+# A token outside this table maps to no slot (fail-closed at verify; no hex at apply).
+# Single source of truth shared by the verify check and the resolver's hex enrichment.
+WML_THEME_TO_SLOT: dict[str, str] = {
+    "text1": "dk1",
+    "text2": "dk2",
+    "background1": "lt1",
+    "background2": "lt2",
+    "dark1": "dk1",
+    "dark2": "dk2",
+    "light1": "lt1",
+    "light2": "lt2",
+    "accent1": "accent1",
+    "accent2": "accent2",
+    "accent3": "accent3",
+    "accent4": "accent4",
+    "accent5": "accent5",
+    "accent6": "accent6",
+    "hyperlink": "hlink",
+    "followedHyperlink": "folHlink",
+}
+
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
 def _a(tag: str) -> str:
     """Clark-notation qualified name for an ``a:`` (DrawingML) local name."""
     return qname(A_NS, tag)
+
+
+def seed_theme_palette(theme: dict) -> dict:
+    """Seed a MINIMAL ``theme['palette']`` from the ``theme['colors']`` slots, in
+    place, and return it (model-driven color, the format-uniform UNDERSTAND seed).
+
+    A theme-keyed palette entry is created for every canonical :data:`THEME_SLOTS`
+    slot the parsed theme carries, with the byte-identical ``ref`` and the same
+    entry shape the docx ``capture_palette`` writes (empty provenance, ``rare``
+    coarse frequency, the three model-only fields ``name`` / ``purpose`` /
+    ``use_when`` explicitly null). This is the floor that gives the pptx/xlsx
+    surfaced ``palette`` inventory a non-empty set so a ``palette_annotations`` key
+    is not fail-closed on empty for those formats - the docx extractor still runs
+    the richer run/link/role-color capture on top. Deterministic and idempotent.
+    """
+    palette = theme.setdefault("palette", {})
+    for slot in THEME_SLOTS:
+        if slot in (theme.get("colors") or {}) and slot not in palette:
+            palette[slot] = {
+                "ref": {"kind": "theme", "theme": slot},
+                "provenance": [],
+                "frequency": "rare",
+                "name": None,
+                "purpose": None,
+                "use_when": None,
+            }
+    return palette
 
 
 # ---------------------------------------------------------------------------

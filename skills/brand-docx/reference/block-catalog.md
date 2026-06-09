@@ -6,8 +6,10 @@ the resolver maps each block to a concrete brand artifact in `profile.json`. The
 authoritative model lives in `scripts/brandkit/ir/model.py` (the `BLOCK_TYPES`
 registry is the closed set of `type` discriminators).
 
-Inline text is a **rich-run array** (`runs: [{t, b?, i?, u?, code?, link?}]`); a
-bare `text: "..."` is accepted as sugar and normalized to runs on parse.
+Inline text is a **rich-run array**
+(`runs: [{t, b?, i?, u?, strike?, code?, sup?, sub?, link?, color?}]`); a
+bare `text: "..."` is accepted as sugar and normalized to runs on parse. `color` is a
+brand **palette token** (a theme slot like `accent1`), never a literal hex.
 
 DOCX generation now renders **every** block type natively - `heading`,
 `paragraph`, `callout`, `list`, `table`, `quote`, `caption`, `divider`, `image`,

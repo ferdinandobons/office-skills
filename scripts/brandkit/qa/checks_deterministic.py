@@ -7,16 +7,20 @@ import hashlib
 from pathlib import Path
 
 from docx import Document
-from lxml import etree
 from openpyxl import load_workbook
 from pptx import Presentation
 
+from brandkit.common import color as colorutil
 from brandkit.common import text as textutil
-from brandkit.ooxml import pack
+from brandkit.ooxml import names, pack
 from brandkit.profile import comprehension as comprehensionmod
 from brandkit.profile import schema
 from brandkit.profile.reconcile import confidence_clears_floor
 from brandkit.qa.model import Finding
+
+# WordprocessingML qualified-name builder (the spec-fixed namespace), so the shell
+# readers below never hand-copy the namespace URI.
+_W = names.make_qn("w")
 
 
 def check_profile(profile: dict) -> list[Finding]:
@@ -253,26 +257,137 @@ def _docx_shell_fonts(shell, profile: dict) -> set:
         xml = pack.read_part(shell, "word/fontTable.xml")
     except KeyError:
         return fonts
-    root = etree.fromstring(xml)
-    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    for font_el in root.findall(f"{ns}font"):
-        name = font_el.get(f"{ns}name")
+    root = pack.parse_xml_bytes(xml)
+    for font_el in root.findall(_W("font")):
+        name = font_el.get(_W("name"))
         if name:
             fonts.add(name)
     return fonts
 
 
-def check_appearance_targets(shell, profile: dict) -> list[Finding]:
-    """Verify every font the engine will APPLY is one the ``shell`` actually carries.
+def _docx_shell_run_sizes_and_hexes(shell) -> tuple[set[int], set[str]]:
+    """The PROVENANCE sets an applied size/color is validated against, read from the
+    template's ``word/document.xml`` runs in a SINGLE parse:
 
-    Typography capture records the template's dominant direct run fonts into
-    ``role.appearance.font.latin`` and ``theme.fonts.body.latin``; this is their
-    shell-backed peer of :func:`check_resolver_targets`. A font the shell does not
-    make available (e.g. a hand-edited profile) is an ERROR - off-brand output stays
-    impossible by construction. Only the fonts that will be applied are checked; the
-    theme major/minor declarations belong to the ALLOWED set, never the checked set.
-    A no-op when no appearance/body font is present (every pre-capture profile), and
-    for non-docx kinds.
+      - sizes: every ``w:sz@w:val`` (half-points) the template's OWN runs carry;
+      - hexes: every ``w:color@w:val`` (normalized hex), skipping ``auto``.
+
+    A captured size/hex is only trusted when the template itself uses it (not a sanity
+    bound). The hardened parser (``parse_xml_bytes``, ``resolve_entities=False``)
+    matches every other shell-XML read. A missing/garbage document part yields empty
+    sets - the caller then fails closed on any applied size/color."""
+    sizes: set[int] = set()
+    hexes: set[str] = set()
+    try:
+        xml = pack.read_part(shell, "word/document.xml")
+    except KeyError:
+        return sizes, hexes
+    root = pack.parse_xml_bytes(xml)
+    for sz in root.iter(_W("sz")):
+        val = sz.get(_W("val"))
+        if val is None:
+            continue
+        try:
+            sizes.add(int(val))
+        except (TypeError, ValueError):
+            continue
+    for color in root.iter(_W("color")):
+        val = color.get(_W("val"))
+        if not val or val.lower() == "auto":
+            continue
+        try:
+            hexes.add(colorutil.normalize_hex(val))
+        except (ValueError, AttributeError):
+            continue
+    return sizes, hexes
+
+
+# The WordprocessingML themeColor -> clrScheme slot alias table, the single source of
+# truth in brandkit.common.color (shared with the resolver's hex enrichment). A token
+# outside it has no palette slot and is rejected (fail-closed).
+_WML_THEME_TO_SLOT = colorutil.WML_THEME_TO_SLOT
+
+
+def _docx_theme_palette(shell) -> dict[str, str]:
+    """The template's parsed theme palette (slot -> hex). Reads the shell's own
+    ``theme1.xml``; an absent part yields an empty palette (every theme-token color
+    then fails closed)."""
+    try:
+        xml = pack.read_part(shell, "word/theme/theme1.xml")
+    except KeyError:
+        return {}
+    return colorutil.parse_theme_colors(xml)
+
+
+def _collect_applied_appearance(
+    profile: dict,
+) -> tuple[list[tuple[str, int]], list[tuple[str, dict]]]:
+    """Gather every (where, size_hp) and (where, color-obj) the engine will APPLY.
+
+    Scans per-role ``appearance`` plus the document body defaults
+    (``theme.fonts.body.size_hp`` for size, ``theme.text.body.color`` for color),
+    plus EVERY ``theme.palette[*].ref`` color object - a run carrying a palette
+    color token is realized into that ref by the resolver, so each palette ref is an
+    APPLIED color the shell must independently prove it carries. Folding the palette
+    refs in here means ``check_appearance_targets`` re-validates them with the exact
+    same loop (hex vs the palette UNION the observed ``w:color``; theme token vs the
+    mapped ``clrScheme`` slot), fail-closed - the model can NAME a palette color but
+    the deterministic shell still has to back it."""
+    sizes: list[tuple[str, int]] = []
+    colors: list[tuple[str, dict]] = []
+    for rid, entry in (profile.get("roles") or {}).items():
+        if rid == "_index" or not isinstance(entry, dict):
+            continue
+        appearance = entry.get("appearance") or {}
+        size_hp = appearance.get("size_hp")
+        if size_hp:
+            sizes.append((f"role {rid!r}", int(size_hp)))
+        color = appearance.get("color")
+        if isinstance(color, dict):
+            colors.append((f"role {rid!r}", color))
+    theme = profile.get("theme") or {}
+    body_size = ((theme.get("fonts") or {}).get("body") or {}).get("size_hp")
+    if body_size:
+        sizes.append(("theme.fonts.body", int(body_size)))
+    body_color = ((theme.get("text") or {}).get("body") or {}).get("color")
+    if isinstance(body_color, dict):
+        colors.append(("theme.text.body", body_color))
+    # Every palette ref is an applicable run color (a run color token resolves to
+    # it), so re-validate it against the shell with the same loop. Sorted for a
+    # deterministic finding order.
+    for key in sorted((theme.get("palette") or {})):
+        entry = (theme.get("palette") or {}).get(key)
+        if not isinstance(entry, dict):
+            continue
+        ref = entry.get("ref")
+        if isinstance(ref, dict):
+            colors.append((f"theme.palette.{key}", ref))
+    return sizes, colors
+
+
+def check_appearance_targets(shell, profile: dict) -> list[Finding]:
+    """Verify every typography value the engine will APPLY is one the ``shell``
+    actually proves it carries (font family, run size, run color).
+
+    Typography capture records the template's dominant direct run font/size/color
+    into ``role.appearance`` and the document defaults (``theme.fonts.body`` for
+    font/size, ``theme.text.body`` for color); this is their shell-backed peer of
+    :func:`check_resolver_targets`. Each axis re-validates against true PROVENANCE,
+    not a sanity bound, and fails closed (ERROR) on any applied value the shell does
+    not prove it contains - off-brand output stays impossible by construction:
+
+      - FONT: must be in the shell fontTable + theme latin faces + the Arial
+        baseline (the ALLOWED set; the theme declarations widen it, never the
+        checked set).
+      - SIZE: the applied ``size_hp`` must be a ``w:sz@w:val`` actually present on
+        the template's ``document.xml`` runs.
+      - COLOR (hex): the applied hex must be a theme-palette hex OR a ``w:color``
+        actually present on the template's runs.
+      - COLOR (theme token): the token's mapped ``clrScheme`` slot
+        (:data:`_WML_THEME_TO_SLOT`) must be present in the parsed palette.
+
+    A no-op when no appearance value is present (every pre-capture profile), and for
+    non-docx kinds.
     """
     if shell is None or profile.get("kind") != schema.Kind.DOCX.value:
         return []
@@ -310,6 +425,73 @@ def check_appearance_targets(shell, profile: dict) -> list[Finding]:
                     f"(have {sorted(available)})",
                 )
             )
+
+    applied_sizes, applied_colors = _collect_applied_appearance(profile)
+    if applied_sizes or applied_colors:
+        try:
+            shell_sizes, shell_hexes = _docx_shell_run_sizes_and_hexes(shell)
+            palette = _docx_theme_palette(shell)
+        except Exception as exc:  # opening the shell must never crash the gate
+            return findings + [
+                Finding(
+                    "appearance_targets_exist",
+                    schema.Severity.WARNING.value,
+                    f"could not verify run size/color against shell: {exc}",
+                )
+            ]
+        for where, size_hp in applied_sizes:
+            if size_hp not in shell_sizes:
+                findings.append(
+                    Finding(
+                        "appearance_targets_exist",
+                        schema.Severity.ERROR.value,
+                        f"{where} size {size_hp} (half-points) is not present on any "
+                        f"run in the shell (have {sorted(shell_sizes)})",
+                    )
+                )
+        palette_hexes = {colorutil.normalize_hex(h) for h in palette.values()}
+        allowed_hexes = palette_hexes | shell_hexes
+        for where, color in applied_colors:
+            kind = color.get("kind")
+            if kind == "hex":
+                try:
+                    hexval = colorutil.normalize_hex(color.get("hex") or "")
+                except (ValueError, AttributeError):
+                    hexval = None
+                if hexval is None or hexval not in allowed_hexes:
+                    findings.append(
+                        Finding(
+                            "appearance_targets_exist",
+                            schema.Severity.ERROR.value,
+                            f"{where} color #{color.get('hex')!r} is not in the shell "
+                            f"palette or its runs (allowed {sorted(allowed_hexes)})",
+                        )
+                    )
+            elif kind == "theme":
+                token = color.get("theme")
+                # A theme ref may name the color in EITHER namespace and both must
+                # validate against the parsed clrScheme palette:
+                #   - a WML ``themeColor`` token (``text1`` / ``background1`` /
+                #     ``hyperlink`` ...) captured off a run, mapped to its
+                #     clrScheme slot via _WML_THEME_TO_SLOT;
+                #   - a clrScheme slot name directly (``dk1`` / ``lt1`` / ``hlink``
+                #     ... or ``accent1``), which ``theme.palette`` keys/seeds use
+                #     verbatim (it has no WML alias for the dk/lt/hlink slots).
+                # The token is present when it resolves to a parsed-palette slot
+                # through either route; only a token that does neither fails closed.
+                slot = _WML_THEME_TO_SLOT.get(token)
+                present = (slot is not None and slot in palette) or (
+                    token in colorutil.THEME_SLOTS and token in palette
+                )
+                if not present:
+                    findings.append(
+                        Finding(
+                            "appearance_targets_exist",
+                            schema.Severity.ERROR.value,
+                            f"{where} theme color {token!r} is absent from the shell "
+                            f"palette (have {sorted(palette)})",
+                        )
+                    )
     return findings
 
 
@@ -370,6 +552,40 @@ def check_comprehension_targets(profile: dict) -> list[Finding]:
         findings.append(
             Finding("comprehension_targets_exist", schema.Severity.ERROR.value, problem)
         )
+    return findings
+
+
+def check_color_token_targets(profile: dict) -> list[Finding]:
+    """FAIL-CLOSED membership of every COLOR token against ``theme.palette``.
+
+    The sibling of :func:`check_comprehension_targets` for model-driven color: a
+    color token is only valid when it is a verbatim key of ``theme.palette`` (the
+    SOLE namespace a run color resolves off - never ``palette_roles``). Today the
+    only place a comprehension references a palette key is
+    ``comprehension.palette_annotations`` (the model NAMES a captured color); each
+    key must be a real palette entry, mirroring ``check_membership``'s rule for
+    anchor/index/region refs - a key into an EMPTY/absent palette is itself an ERROR
+    (the model can never invent a color the deterministic capture did not observe).
+
+    Model-free and deterministic. No-ops when the comprehension is absent (status !=
+    present), so the model-free CI path and a pre-palette profile stay green.
+    """
+    comp = _present_comprehension(profile)
+    if comp is None:
+        return []
+    palette = (profile.get("theme") or {}).get("palette") or {}
+    palette_keys = set(palette)
+    findings: list[Finding] = []
+    for key in comp.get("palette_annotations") or {}:
+        if key not in palette_keys:
+            findings.append(
+                Finding(
+                    "color_token_targets_exist",
+                    schema.Severity.ERROR.value,
+                    f"color token {key!r} is not a key of theme.palette "
+                    f"(have {sorted(palette_keys)})",
+                )
+            )
     return findings
 
 

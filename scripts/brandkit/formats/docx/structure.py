@@ -1202,6 +1202,60 @@ def refresh_visible_outline_toc_cache(doc, headings: list[tuple[int, str]]) -> i
     return rewritten
 
 
+def refresh_visible_caption_index_cache(doc, entries_by_seq: dict) -> int:
+    r"""Rewrite the visible cache of every KEPT caption index from the emitted captions.
+
+    The sibling of :func:`refresh_visible_outline_toc_cache` for ``TOC \c "<seq>"``
+    caption indexes (a table-of-tables / table-of-figures). Marking the field dirty is
+    enough for Word-on-open, but headless LibreOffice renders the stale cached result
+    on export, so this replaces each kept caption index's cached entry paragraphs with
+    one entry per caption the generator emitted for that index's ``seq_id``. The field
+    code (the ``TOC \c`` instruction) is preserved and re-marked dirty, so Word still
+    recomputes it on open. ``entries_by_seq`` maps a ``seq_id`` to its ordered visible
+    entry strings (e.g. ``{"Tabella": ["Tabella 1. ...", "Tabella 2. ..."]}``).
+
+    A caption index spans several top-level body children (begin/instr/separate plus
+    entry-1 in the first paragraph, more entries in following paragraphs, the closing
+    ``end`` fldChar in the last). Each kept index is rebuilt as
+    ``[field-start, entry*, field-end]`` cloned from its first paragraph's style.
+    Processed LAST-first so a splice never invalidates an earlier index's body-child
+    span. Returns the number of indexes rebuilt.
+    """
+    if not entries_by_seq:
+        return 0
+    body = doc.element.body
+    fields = [
+        f
+        for f in _toc_field_begins(list(body))
+        if f.get("seq_id") in entries_by_seq
+        and f.get("begin_index") is not None
+        and f.get("end_index") is not None
+        and f["end_index"] >= f["begin_index"]
+    ]
+    rebuilt = 0
+    for f in sorted(fields, key=lambda f: f["begin_index"], reverse=True):
+        entries = entries_by_seq.get(f["seq_id"]) or []
+        if not entries:
+            continue
+        children = list(body)
+        begin_i, end_i = f["begin_index"], f["end_index"]
+        if end_i >= len(children):
+            continue
+        template_p = children[begin_i]
+        instr = f" {f['instr'].strip()} "  # restore the field-code surrounding spaces
+        new_paras = [_toc_field_start_paragraph(instr, template_p)]
+        new_paras.extend(_toc_entry_paragraph(1, text, template_p) for text in entries)
+        new_paras.append(_toc_field_end_paragraph(template_p))
+        for np in new_paras:
+            template_p.addprevious(np)
+        for k in range(begin_i, end_i + 1):
+            old = children[k]
+            if not _is_sectpr(old) and old.getparent() is body:
+                body.remove(old)
+        rebuilt += 1
+    return rebuilt
+
+
 def _outline_toc_instruction(el) -> Optional[str]:
     """Return the full instruction of an outline ``TOC`` field inside ``el``, or None.
 

@@ -11,7 +11,7 @@ from docx import Document
 from brandkit.common import color
 from brandkit.formats import catalog
 from brandkit.formats.docx import cover, roles, structure, typography
-from brandkit.ooxml import pack
+from brandkit.ooxml import names, pack
 from brandkit.profile import schema, store
 
 
@@ -32,6 +32,11 @@ def extract(
     # the named styles/theme never carry) into role.appearance + theme.fonts.body.
     # Additive and deterministic: a template with no dominant direct font is a no-op.
     typography.capture_fonts(doc, role_registry, theme)
+    # Capture the brand PALETTE (theme.palette): the UNDERSTAND half of model-driven
+    # color, built from observed facts only (theme slots, run colors incl. a low-floor
+    # accent aggregation, per-role appearance colors, link colors). Additive and
+    # deterministic; a template with no observed color leaves an empty palette.
+    typography.capture_palette(doc, role_registry, theme)
     cover_anchors, anchors = cover.discover_cover(doc)
     demo_region = structure.detect_demo_region(doc)
     toc_present = structure.is_toc_present(doc)
@@ -99,11 +104,88 @@ def _extract_theme(path: Path) -> dict:
             "surface": {"theme": "lt2"},
             "danger": {"theme": "accent4"},
         },
-        "fonts": {
-            "major": {"latin": None, "fallback": "Arial"},
-            "minor": {"latin": None, "fallback": "Calibri"},
-        },
+        "fonts": _extract_theme_fonts(path),
         "embedded_fonts": [],
+    }
+
+
+# DrawingML + WordprocessingML namespace-bound qualifiers for the font reader.
+_A = names.make_qn("a")
+_W = names.make_qn("w")
+
+
+def _major_minor_latin(path: Path) -> tuple[str | None, str | None]:
+    """Read the major/minor latin typefaces from ``word/theme/theme1.xml``.
+
+    Returns ``(major, minor)`` where each is the
+    ``a:fontScheme/a:majorFont|a:minorFont/a:latin@typeface`` value, or ``None``
+    when the part, the element, or the attribute is missing - or when the
+    typeface is the empty string (Office writes ``typeface=""`` to mean "none").
+    A missing theme part is the only swallowed error (KeyError), preserving the
+    extractor's contract; any other parse error propagates. The parser is the
+    hardened OOXML one (``resolve_entities=False``), so a malicious theme cannot
+    pull in external entities.
+    """
+    try:
+        xml = pack.read_part(path, "word/theme/theme1.xml")
+    except KeyError:
+        return None, None
+    root = pack.parse_xml_bytes(xml)
+    scheme = root.find(f".//{_A('fontScheme')}")
+    if scheme is None:
+        return None, None
+
+    def latin_of(font_tag: str) -> str | None:
+        font = scheme.find(_A(font_tag))
+        if font is None:
+            return None
+        latin = font.find(_A("latin"))
+        if latin is None:
+            return None
+        # An empty ``typeface=""`` is Office's "no face here" sentinel, not a font.
+        return latin.get("typeface") or None
+
+    return latin_of("majorFont"), latin_of("minorFont")
+
+
+def _doc_default_ascii(path: Path) -> str | None:
+    """Read the document-default ascii body face from ``word/styles.xml``.
+
+    Returns ``docDefaults/rPrDefault/rPr/rFonts@w:ascii`` (else ``@w:hAnsi``), or
+    ``None`` when any link in that chain is absent - including the common case
+    where the default ``rFonts`` carries only a THEME reference
+    (``w:asciiTheme``) and no literal face. A missing styles part is swallowed
+    (KeyError); any other parse error propagates. Hardened parser, as above.
+    """
+    try:
+        xml = pack.read_part(path, "word/styles.xml")
+    except KeyError:
+        return None
+    root = pack.parse_xml_bytes(xml)
+    rfonts = root.find(
+        f"{_W('docDefaults')}/{_W('rPrDefault')}/{_W('rPr')}/{_W('rFonts')}"
+    )
+    if rfonts is None:
+        return None
+    return rfonts.get(_W("ascii")) or rfonts.get(_W("hAnsi")) or None
+
+
+def _extract_theme_fonts(path: Path) -> dict:
+    """The template's TRUTHFUL theme fonts (major/minor), read from the package.
+
+    The latin faces are the theme's own ``a:majorFont``/``a:minorFont`` latin
+    typefaces; the fallback is the document-default ascii body face. The major
+    fallback keeps ``'Arial'`` (Word's universal baseline, NOT a brand value)
+    when no doc-default ascii is declared; the minor fallback is the real
+    doc-default ascii (``None`` when absent). These declarations are read-only
+    here: the resolver never reads major/minor - they only widen the allow-set
+    that ``check_appearance_targets`` validates applied fonts against.
+    """
+    major_latin, minor_latin = _major_minor_latin(path)
+    doc_ascii = _doc_default_ascii(path)
+    return {
+        "major": {"latin": major_latin, "fallback": doc_ascii or "Arial"},
+        "minor": {"latin": minor_latin, "fallback": doc_ascii},
     }
 
 

@@ -423,6 +423,11 @@ def _empty_theme() -> dict:
     return {
         "colors": {},
         "palette_roles": {},
+        # Additive, optional. The brand PALETTE: a template-derived map keyed by a
+        # theme slot token or ``hex:RRGGBB``. Empty until ``capture_palette`` runs;
+        # never load-bearing (so no SCHEMA_VERSION bump - it is an additive optional
+        # key, readable by every 1.x reader as its documented default ``{}``).
+        "palette": {},
         "fonts": {
             "major": {"latin": None, "fallback": None},
             "minor": {"latin": None, "fallback": None},
@@ -525,6 +530,12 @@ def validate(profile: dict) -> list[str]:
     theme = profile.get("theme")
     if not isinstance(theme, dict) or "colors" not in theme:
         problems.append("theme: must be an object with a 'colors' map")
+
+    # theme.palette (optional, additive). Absent is fine; present must be
+    # well-shaped (shape-only - membership of a color token against the palette is
+    # the fail-closed QA check's job, not this structural validator's).
+    if isinstance(theme, dict):
+        problems.extend(_validate_palette(theme.get("palette")))
 
     # roles registry
     problems.extend(_validate_roles(profile.get("roles"), kind))
@@ -811,6 +822,99 @@ def _validate_structure(structure: Any) -> list[str]:
     return problems
 
 
+# The closed ``where`` vocabulary for a ``theme.palette`` entry's provenance. A
+# palette provenance fact records WHICH observed source named the color; nothing
+# outside this set may appear. The frozen mirror of
+# ``docx.typography.PALETTE_WHERE`` (kept here so the validator has no format
+# import). ``palette_role`` is the only NON-authoritative source.
+PALETTE_WHERE: frozenset[str] = frozenset(
+    {"palette_role", "role.appearance", "run.color", "link.color"}
+)
+# The COARSE frequency buckets a palette entry may carry (never raw counts).
+PALETTE_FREQUENCIES: frozenset[str] = frozenset({"dominant", "accent", "rare"})
+
+
+def _validate_palette(palette: Any) -> list[str]:
+    """Validate the optional ``theme.palette`` block (absent is fine).
+
+    SHAPE-ONLY, consistent with the rest of this structural validator. Each entry
+    (keyed by a template-derived id - a theme slot token or ``hex:RRGGBB``) must
+    carry:
+      - ``ref``: an object with a closed ``kind`` (``theme`` -> ``theme`` slot
+        string; ``hex`` -> ``hex`` string);
+      - ``provenance`` (if present): a list of ``{where, detail}`` facts whose
+        ``where`` is in the closed :data:`PALETTE_WHERE` vocabulary;
+      - ``frequency`` (if present): one of :data:`PALETTE_FREQUENCIES`;
+      - ``name`` / ``purpose`` / ``use_when`` (if present): advisory strings or
+        null (the model fills these; never gated for VALUE).
+
+    It deliberately does NOT check that a color TOKEN referenced elsewhere is a
+    key of the palette - that is the fail-closed ``check_color_token_targets`` QA
+    check. NEVER required: an absent / empty palette yields no problems.
+    """
+    if palette is None:
+        return []
+    if not isinstance(palette, dict):
+        return ["theme.palette: must be an object mapping color id -> entry"]
+    problems: list[str] = []
+    for key, entry in palette.items():
+        path = f"theme.palette.{key}"
+        if not isinstance(key, str) or not key:
+            problems.append(f"{path}: palette key must be a non-empty string")
+        if not isinstance(entry, dict):
+            problems.append(f"{path}: must be an object")
+            continue
+        ref = entry.get("ref")
+        if not isinstance(ref, dict):
+            problems.append(f"{path}.ref: required object")
+        else:
+            rkind = ref.get("kind")
+            if rkind == "theme":
+                if not isinstance(ref.get("theme"), str) or not ref.get("theme"):
+                    problems.append(f"{path}.ref.theme: required non-empty string")
+            elif rkind == "hex":
+                if not isinstance(ref.get("hex"), str) or not ref.get("hex"):
+                    problems.append(f"{path}.ref.hex: required non-empty string")
+            else:
+                problems.append(
+                    f"{path}.ref.kind: illegal value {rkind!r} (legal: 'theme' | 'hex')"
+                )
+        provenance = entry.get("provenance")
+        if provenance is not None:
+            if not isinstance(provenance, list):
+                problems.append(f"{path}.provenance: must be a list")
+            else:
+                for i, fact in enumerate(provenance):
+                    fpath = f"{path}.provenance[{i}]"
+                    if not isinstance(fact, dict):
+                        problems.append(f"{fpath}: must be an object")
+                        continue
+                    where = fact.get("where")
+                    if where not in PALETTE_WHERE:
+                        problems.append(
+                            f"{fpath}.where: illegal value {where!r} "
+                            f"(legal: {sorted(PALETTE_WHERE)})"
+                        )
+                    detail = fact.get("detail")
+                    if detail is not None and not isinstance(detail, str):
+                        problems.append(
+                            f"{fpath}.detail: must be a string or null, got {detail!r}"
+                        )
+        freq = entry.get("frequency")
+        if freq is not None and freq not in PALETTE_FREQUENCIES:
+            problems.append(
+                f"{path}.frequency: illegal value {freq!r} "
+                f"(legal: {sorted(PALETTE_FREQUENCIES)})"
+            )
+        for advisory in ("name", "purpose", "use_when"):
+            val = entry.get(advisory)
+            if val is not None and not isinstance(val, str):
+                problems.append(
+                    f"{path}.{advisory}: must be a string or null, got {val!r}"
+                )
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # Comprehension block (additive, schema 1.2.0)
 # ---------------------------------------------------------------------------
@@ -823,6 +927,11 @@ FILL_RULES: frozenset[str] = frozenset(e.value for e in FillRule)
 RECONCILE_RULES: frozenset[str] = frozenset(e.value for e in Reconcile)
 VERDICTS: frozenset[str] = frozenset(e.value for e in Verdict)
 FRAGMENT_KINDS: frozenset[str] = frozenset(e.value for e in FragmentKind)
+# Closed enum for a caption index's content TARGET: which captionable kind feeds it
+# (a list-of-tables is fed by table captions, a list-of-figures by figure captions).
+# Optional and additive; lets the generator map a caption's ``target`` to the index's
+# opaque ``seq_id`` brand-agnostically, without a language heuristic on the seq name.
+CAPTION_TARGETS: frozenset[str] = frozenset({"table", "figure"})
 
 
 def empty_comprehension() -> dict:
@@ -846,6 +955,12 @@ def empty_comprehension() -> dict:
         # is DERIVED into profile['components'] / profile['sections'] (the existing
         # registries expand_components inlines). Empty is the norm.
         "fragments": [],
+        # Additive (model-driven color): the model NAMES each captured palette color
+        # (a key of ``theme.palette``) - name / purpose / use_when / semantic_role -
+        # without ever authoring a real color. On a clean merge the advisory fields
+        # are mirrored onto ``theme.palette[key]`` (the derived sink). Empty is the
+        # norm; the model never writes ``ref`` / a hex.
+        "palette_annotations": {},
     }
 
 
@@ -975,8 +1090,58 @@ def _validate_comprehension(comp: Any) -> list[str]:
                                 f"(legal: {sorted(VERDICTS)})"
                             )
 
+    # palette_annotations: { <palette_key>: { name?, purpose?, use_when?,
+    # semantic_role? } } - the model NAMES a captured color. SHAPE-ONLY (advisory
+    # strings); membership of the KEY against the surfaced palette inventory is the
+    # fail-closed check_membership / check_color_token_targets job, not this
+    # never-required structural validator's.
+    problems.extend(_validate_palette_annotations(comp.get("palette_annotations")))
+
     # fragments: [ { ref, kind, blocks, purpose? } ] - reusable-fragment proposals.
     problems.extend(_validate_comp_fragments(comp.get("fragments")))
+    return problems
+
+
+# The advisory free-text fields a palette annotation may carry (the model NAMES a
+# captured color; it never authors a real color, so ``ref``/``hex`` are NOT here).
+PALETTE_ANNOTATION_FIELDS: tuple[str, ...] = (
+    "name",
+    "purpose",
+    "use_when",
+    "semantic_role",
+)
+
+
+def _validate_palette_annotations(annotations: Any) -> list[str]:
+    """Validate ``comprehension.palette_annotations`` (absent is fine).
+
+    SHAPE-ONLY: a map ``{ <palette_key>: { name?, purpose?, use_when?,
+    semantic_role? } }`` whose every value is an object of advisory strings (or
+    null). The KEY is a template-derived palette id (``accent1`` / ``hex:RRGGBB``)
+    and is NOT syntax-checked here (a ``hex:...`` key is legal and would fail a
+    role-id regex); its MEMBERSHIP against the surfaced palette inventory is the
+    fail-closed QA check. NEVER required.
+    """
+    if annotations is None:
+        return []
+    if not isinstance(annotations, dict):
+        return ["comprehension.palette_annotations: must be an object"]
+    problems: list[str] = []
+    for key, ann in annotations.items():
+        path = f"comprehension.palette_annotations.{key}"
+        if not isinstance(key, str) or not key:
+            problems.append(f"{path}: palette key must be a non-empty string")
+        if ann is None:
+            continue
+        if not isinstance(ann, dict):
+            problems.append(f"{path}: must be an object")
+            continue
+        for field in PALETTE_ANNOTATION_FIELDS:
+            val = ann.get(field)
+            if val is not None and not isinstance(val, str):
+                problems.append(
+                    f"{path}.{field}: must be a string or null, got {val!r}"
+                )
     return problems
 
 
@@ -1050,6 +1215,12 @@ def _validate_comp_indexes(indexes: Any) -> list[str]:
         seq = idx.get("seq_id")
         if seq is not None and not isinstance(seq, str):
             problems.append(f"{path}.seq_id: must be a string or null, got {seq!r}")
+        target = idx.get("caption_target")
+        if target is not None and target not in CAPTION_TARGETS:
+            problems.append(
+                f"{path}.caption_target: illegal value {target!r} "
+                f"(legal: {sorted(CAPTION_TARGETS)} or null)"
+            )
     return problems
 
 

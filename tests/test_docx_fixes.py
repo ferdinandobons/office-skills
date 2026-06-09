@@ -1378,6 +1378,70 @@ class ComprehensionReconcileTest(unittest.TestCase):
             # The destructive floor did not flag a net loss (verdict corroborated).
             self.assertFalse(any(f.check == "no_net_structure_loss" for f in findings))
 
+    def test_caption_index_regenerated_from_emitted_captions(self):
+        # A KEPT caption index (reconcile=regenerate, caption_target=table) is
+        # rebuilt from the captions the generator emits: each captioned table emits a
+        # SEQ Tabella field and the index's visible cache is regenerated with the new
+        # entries, replacing the template's stale ones.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._build_shell(td)
+            prof = self._profile_for(shell)
+            s = prof["surface"]["docx"]
+            tabella = next(f["id"] for f in s["fields"] if f["seq_id"] == "Tabella")
+            comp = {
+                "conventions": {
+                    "indexes": [
+                        {
+                            "index_ref": tabella,
+                            "seq_id": "Tabella",
+                            "caption_target": "table",
+                            "reconcile": "regenerate",
+                        }
+                    ],
+                    "sections": [],
+                },
+                "demo_classification": {"regions": []},
+            }
+            _present_comp(prof, comp)
+            out = Path(td) / "out.docx"
+            findings: list[Finding] = []
+            idoc = ir.IntermediateDocument(
+                blocks=[
+                    ir.Table.from_dict(
+                        {
+                            "columns": ["A", "B"],
+                            "rows": [["1", "2"]],
+                            "caption": "First data table",
+                        }
+                    ),
+                    ir.Table.from_dict(
+                        {
+                            "columns": ["C", "D"],
+                            "rows": [["3", "4"]],
+                            "caption": "Second data table",
+                        }
+                    ),
+                ]
+            )
+            docx_generate.generate(prof, shell, idoc, out, findings=findings)
+            gen = Document(out)
+            text = "".join(t.text or "" for t in gen.element.body.iter(w("t")))
+            # Index cache regenerated from the new captions; stale entries gone.
+            self.assertIn("Tabella 1. First data table", text)
+            self.assertIn("Tabella 2. Second data table", text)
+            self.assertNotIn("entry one", text)
+            self.assertNotIn("entry two", text)
+            # A real SEQ field was emitted so Word can recompute the index on F9.
+            seq_instrs = [
+                f.get(w("instr")) or "" for f in gen.element.body.iter(w("fldSimple"))
+            ]
+            self.assertTrue(any("SEQ Tabella" in i for i in seq_instrs), seq_instrs)
+            # The kept caption index matches content; no destructive-loss finding.
+            self.assertFalse(any(f.check == "index_matches_content" for f in findings))
+            self.assertFalse(any(f.check == "no_net_structure_loss" for f in findings))
+
     def test_index_clear_downgraded_when_not_corroborated(self):
         import tempfile
 
@@ -1948,6 +2012,230 @@ class MalformedSectionMeasureTest(unittest.TestCase):
             findings: list[Finding] = []
             docx_generate.generate(prof, shell, idoc, out, findings=findings)
             self.assertTrue(out.is_file())
+
+
+# ---------------------------------------------------------------------------
+# Cover content controls bound to core properties (subject/title).
+#   FixA  a bound SDT's CACHED run text is refreshed (body + headers/footers) so a
+#         headless renderer that draws the cache, not the binding, shows the value.
+#   FixC  the role-style re-assertion on a cover SDT is gated on showingPlcHdr: a
+#         real, author-formatted slot keeps its own formatting (a builtin Subtitle
+#         whose color is a near-white tint must not blank a filled slot); only a
+#         bare placeholder control gets the brand role style.
+# ---------------------------------------------------------------------------
+_SUBJECT_XPATH = "/ns1:coreProperties[1]/ns0:subject[1]"
+_TITLE_XPATH = "/ns1:coreProperties[1]/ns0:title[1]"
+
+
+def _databound_sdt(xpath, cache_text, *, showing_placeholder=False, run_bold=False):
+    sdt = OxmlElement("w:sdt")
+    pr = OxmlElement("w:sdtPr")
+    if xpath is not None:
+        db = OxmlElement("w:dataBinding")
+        db.set(qn("w:xpath"), xpath)
+        pr.append(db)
+    if showing_placeholder:
+        pr.append(OxmlElement("w:showingPlcHdr"))
+    sdt.append(pr)
+    content = OxmlElement("w:sdtContent")
+    p = OxmlElement("w:p")
+    r = OxmlElement("w:r")
+    if run_bold:
+        rPr = OxmlElement("w:rPr")
+        rPr.append(OxmlElement("w:b"))
+        r.append(rPr)
+    t = OxmlElement("w:t")
+    t.text = cache_text
+    r.append(t)
+    p.append(r)
+    content.append(p)
+    sdt.append(content)
+    return sdt
+
+
+def _sdt_cache_text(sdt):
+    content = sdt.find(qn("w:sdtContent"))
+    return "".join(t.text or "" for t in content.iter(qn("w:t")))
+
+
+def _sdt_content_pstyle(sdt):
+    content = sdt.find(qn("w:sdtContent"))
+    p = content.find(qn("w:p"))
+    pPr = p.find(qn("w:pPr"))
+    if pPr is None:
+        return None
+    pStyle = pPr.find(qn("w:pStyle"))
+    return pStyle.get(qn("w:val")) if pStyle is not None else None
+
+
+class CoverDataBoundSdtRefreshTest(unittest.TestCase):
+    def test_subject_and_title_caches_refreshed_in_body_and_header(self):
+        doc = Document()
+        body_subject = _databound_sdt(_SUBJECT_XPATH, "Descrizione")
+        body_title = _databound_sdt(_TITLE_XPATH, "Titolo")
+        unbound = _databound_sdt(None, "Keep me")
+        for sdt in (body_subject, body_title, unbound):
+            doc.element.body.append(sdt)
+        # A running-header part with another subject-bound control (the repeated
+        # cover subject corporate templates put in the page header).
+        header = doc.sections[0].header
+        header.is_linked_to_previous = False
+        hdr_subject = _databound_sdt(_SUBJECT_XPATH, "Descrizione")
+        header.part.element.append(hdr_subject)
+
+        covermod._refresh_databound_sdt_caches(doc, "Brand Title", "Brand Subtitle")
+
+        self.assertEqual(_sdt_cache_text(body_subject), "Brand Subtitle")
+        self.assertEqual(_sdt_cache_text(body_title), "Brand Title")
+        self.assertEqual(_sdt_cache_text(hdr_subject), "Brand Subtitle")
+        # An SDT with no data binding is never touched (content, not chrome).
+        self.assertEqual(_sdt_cache_text(unbound), "Keep me")
+
+    def test_subtitle_named_custom_leaf_is_not_filled_as_title(self):
+        # Regression: matching the binding LEAF name (not a raw substring) keeps a
+        # custom 'subtitle'-named leaf from being filled with the TITLE value
+        # ('subtitle' contains the substring 'title').
+        doc = Document()
+        sdt = _databound_sdt("/ns0:custom[1]/ns0:subtitle[1]", "leave me")
+        doc.element.body.append(sdt)
+        covermod._refresh_databound_sdt_caches(doc, "Brand Title", "Brand Subtitle")
+        self.assertEqual(_sdt_cache_text(sdt), "leave me")
+
+    def test_empty_value_leaves_binding_untouched(self):
+        doc = Document()
+        sdt = _databound_sdt(_SUBJECT_XPATH, "Descrizione")
+        doc.element.body.append(sdt)
+        # No subtitle authored -> the subject binding is not refreshed (matches
+        # _sync_core_properties, which only writes a non-empty value).
+        covermod._refresh_databound_sdt_caches(doc, "Only Title", "")
+        self.assertEqual(_sdt_cache_text(sdt), "Descrizione")
+
+
+class CoverSdtStyleReassertGateTest(unittest.TestCase):
+    def _profile(self):
+        return _docx_profile(
+            {
+                "_index": ["cover.subtitle"],
+                "cover.subtitle": {
+                    "resolver": {
+                        "type": "named_style",
+                        "style_id": "Subtitle",
+                        "style_name": "Subtitle",
+                    }
+                },
+            }
+        )
+
+    def test_real_slot_keeps_its_formatting_not_role_style(self):
+        # A real, author-formatted slot (not showing a placeholder) must NOT get the
+        # role's paragraph style stamped over its own direct formatting.
+        doc = Document()
+        sdt = _databound_sdt(
+            _SUBJECT_XPATH, "Descrizione", showing_placeholder=False, run_bold=True
+        )
+        doc.element.body.append(sdt)
+        covermod._fill_anchor_in_place(
+            doc, sdt, "sdt.0", "Brand Subtitle", self._profile(), binds_to="subtitle"
+        )
+        self.assertEqual(_sdt_cache_text(sdt), "Brand Subtitle")  # text filled
+        self.assertIsNone(_sdt_content_pstyle(sdt))  # style NOT overridden
+
+    def test_bare_placeholder_slot_gets_role_style(self):
+        # A bare placeholder control (showingPlcHdr) still gets the brand role style.
+        doc = Document()
+        sdt = _databound_sdt(_SUBJECT_XPATH, "Descrizione", showing_placeholder=True)
+        doc.element.body.append(sdt)
+        covermod._fill_anchor_in_place(
+            doc, sdt, "sdt.0", "Brand Subtitle", self._profile(), binds_to="subtitle"
+        )
+        self.assertEqual(_sdt_cache_text(sdt), "Brand Subtitle")
+        self.assertEqual(_sdt_content_pstyle(sdt), "Subtitle")  # role style applied
+
+
+class CoverDataBoundSdtComposeOrderingTest(unittest.TestCase):
+    """End-to-end through compose_cover (not _fill_anchor_in_place directly) for a cover
+    SDT that is BOTH data-bound to a core title/subject leaf AND showingPlcHdr.
+
+    compose_cover runs _sync_core_properties FIRST, which fills + STRIPS showingPlcHdr
+    on such a slot, so the comprehended path reads POST-SYNC placeholder state by design
+    (documented at cover.py compose_cover): the role-style reassert is skipped (author
+    formatting kept) and a model CLEAR downgrades to KEEP+WARNING. The direct-call gate
+    tests above bypass _sync_core_properties, so this is the missing end-to-end coverage.
+    """
+
+    def _profile(self):
+        return _docx_profile(
+            {
+                "_index": ["cover.subtitle"],
+                "cover.subtitle": {
+                    "resolver": {
+                        "type": "named_style",
+                        "style_id": "Subtitle",
+                        "style_name": "Subtitle",
+                    }
+                },
+            }
+        )
+
+    def _doc_with_bound_placeholder_sdt(self):
+        doc = Document()
+        sdt = _databound_sdt(
+            _SUBJECT_XPATH, "Descrizione", showing_placeholder=True, run_bold=True
+        )
+        doc.element.body.insert(0, sdt)  # body-child index 0 -> anchor "sdt.0"
+        anchor_ref = f"sdt.{list(doc.element.body).index(sdt)}"
+        return doc, sdt, anchor_ref
+
+    def test_in_place_fills_brand_text_and_keeps_author_formatting(self):
+        doc, sdt, anchor_ref = self._doc_with_bound_placeholder_sdt()
+        prof = self._profile()
+        comp = {
+            "cover_slots": {
+                anchor_ref: {
+                    "binds_to": "subtitle",
+                    "fill_rule": "in_place",
+                    "demo_value": "Descrizione",
+                }
+            }
+        }
+        _present_comp(prof, comp)
+        sink: list[Finding] = []
+        covermod.compose_cover(
+            doc, ir.Cover(subtitle=[{"t": "Brand Subtitle"}]), prof, findings=sink
+        )
+        # Brand text filled via the binding refresh ...
+        self.assertEqual(_sdt_cache_text(sdt), "Brand Subtitle")
+        # ... and the reassert was SKIPPED (showingPlcHdr already stripped by
+        # _sync_core_properties), so author formatting is kept: no "Subtitle" pStyle
+        # stamped over the slot, and the run's bold survives.
+        self.assertIsNone(_sdt_content_pstyle(sdt))
+        self.assertTrue(list(sdt.iter(qn("w:b"))), "author bold run preserved")
+
+    def test_clear_of_bound_placeholder_downgrades_to_keep_warning(self):
+        doc, sdt, anchor_ref = self._doc_with_bound_placeholder_sdt()
+        prof = self._profile()
+        comp = {
+            "cover_slots": {
+                anchor_ref: {
+                    "binds_to": "subtitle",
+                    "fill_rule": "clear",
+                    "demo_value": "Descrizione",
+                }
+            }
+        }
+        _present_comp(
+            prof, comp, confidence=0.9
+        )  # 0.9 clears the 0.5 destructive floor
+        sink: list[Finding] = []
+        cleared = covermod.compose_cover(
+            doc, ir.Cover(subtitle=[{"t": "Brand Subtitle"}]), prof, findings=sink
+        )
+        # The CLEAR downgrades to KEEP+WARNING: the binding refresh already stripped
+        # showingPlcHdr, so _clear_is_corroborated is False even though confidence clears
+        # the floor. The slot is kept (not cleared) and keeps the brand text.
+        self.assertTrue(any(f.check == "cover_clear_downgraded" for f in sink), sink)
+        self.assertNotIn(anchor_ref, cleared)
+        self.assertEqual(_sdt_cache_text(sdt), "Brand Subtitle")
 
 
 if __name__ == "__main__":

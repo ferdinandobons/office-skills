@@ -60,12 +60,12 @@ stamping `source_shell_sha256` from the live shell hash. On any finding it write
 the offending refs, and retry. A clean merge is idempotent: running `comprehend`
 twice yields a byte-identical `profile.json`.
 
-## The five questions (the SAME for every format)
+## The six questions (the SAME for every format)
 
-Reasoning over the **structure** in the bundle, answer exactly these five
+Reasoning over the **structure** in the bundle, answer exactly these six
 questions. They are format-neutral: a cover slot is a cover slot, a derived index
-is a derived index, demo content is demo content, whether the file is a Word
-document, a PowerPoint deck, or an Excel workbook.
+is a derived index, demo content is demo content, a brand color is a brand color,
+whether the file is a Word document, a PowerPoint deck, or an Excel workbook.
 
 1. **What is each element FOR?** For each surfaced role and cover anchor, what is
    its purpose in this template? Annotate roles in `role_annotations` and name
@@ -77,7 +77,12 @@ document, a PowerPoint deck, or an Excel workbook.
    of contents, a list of tables/figures, an agenda/section list, anything the
    document regenerates from its own content), which role's items feed it, and
    should it be regenerated, preserved, or cleared? Record it in
-   `conventions.indexes`.
+   `conventions.indexes`. For a **caption index** (a list of tables or figures,
+   identified by a non-null `seq_id`), also set `caption_target` (`table` or
+   `figure`): it tells `generate` which captionable kind feeds the index, so it can
+   emit the matching numbered `SEQ` field on each caption and regenerate the index
+   from the new content. Without it a caption index can only be preserved or cleared
+   (never repopulated), so its cache would keep the template's stale entries.
 4. **Which cover slot is which?** For each surfaced cover anchor, which content
    slot fills it (`binds_to`), and should it be filled in place, cleared, or left
    alone (`fill_rule`)? Record it in `cover_slots`.
@@ -90,6 +95,15 @@ document, a PowerPoint deck, or an Excel workbook.
    template built ONLY from primitive block types. Put a `{{slot}}` token wherever
    the text varies per use; the author fills it via the referencing block's
    `slots`. Propose nothing when no shape genuinely recurs.
+6. **What is each brand color FOR / where does the template use it?** The bundle's
+   `palette` lists every brand color the extractor observed (a theme slot like
+   `accent1`, or an off-theme `hex:RRGGBB`), each with its captured `ref`,
+   `provenance` (where it was seen), and a coarse `frequency`. For each color, what
+   role does it play in this template (a `name`, a `purpose`, a `use_when`, an
+   optional `semantic_role`)? Record it in `palette_annotations`, keyed by the
+   palette id. You **name** a color; you never author one - the deterministic
+   capture owns the actual `ref`/hex, and a key into an empty/absent `palette`
+   inventory is fail-closed. Annotate nothing when the template carried no color.
 
 ## The anti-overfitting directive (state and obey verbatim)
 
@@ -101,14 +115,16 @@ document, a PowerPoint deck, or an Excel workbook.
 Concretely, in the comprehension JSON:
 
 - Every **load-bearing reference** - a `cover_slots` key (`anchor_ref`), an
-  `index_ref`, a `region_ref`, a `feeds_from_role_id`, a `role_annotations` key -
-  **must be a verbatim id copied from the facts bundle**. If an id is not in the
-  surfaced inventory, do not invent it; the merge is fail-closed and will reject
-  it (a ref into an empty inventory is itself an error).
-- Five fields are closed enums, and each maps to a real engine branch:
+  `index_ref`, a `region_ref`, a `feeds_from_role_id`, a `role_annotations` key, a
+  `palette_annotations` key (a palette id) - **must be a verbatim id copied from
+  the facts bundle**. If an id is not in the surfaced inventory, do not invent it;
+  the merge is fail-closed and will reject it (a ref into an empty inventory is
+  itself an error).
+- Six fields are closed enums, and each maps to a real engine branch:
   `status` (`present|absent|rejected`), `fill_rule` (`in_place|clear|leave`),
-  `reconcile` (`regenerate|preserve|clear`), `verdict` (`demo|real|mixed`), and a
-  `fragments` entry's `kind` (`component|section`). Use exactly those values.
+  `reconcile` (`regenerate|preserve|clear`), `verdict` (`demo|real|mixed`), a
+  `fragments` entry's `kind` (`component|section`), and a caption index's
+  `caption_target` (`table|figure`). Use exactly those values.
 - Every other field (`semantic_role`, an index's `kind`, `purpose`,
   `generation_rules`, `evidence`, region names) is an **open advisory token**. The
   generator never pattern-matches on it, so write it honestly for a human reader;
@@ -134,7 +150,10 @@ each `<...>` with a verbatim id from your own bundle.
   "conventions": {
     "indexes": [
       { "index_ref": "<index-A>", "kind": "outline", "seq_id": null,
-        "feeds_from_role_id": "heading.1", "reconcile": "regenerate" }
+        "feeds_from_role_id": "heading.1", "reconcile": "regenerate" },
+      { "index_ref": "<index-B>", "kind": "caption", "seq_id": "<seq>",
+        "feeds_from_role_id": "caption", "caption_target": "table",
+        "reconcile": "regenerate" }
     ],
     "sections": [ { "region_ref": "<region-1>", "required": true, "repeatable": false } ]
   },
@@ -150,9 +169,21 @@ each `<...>` with a verbatim id from your own bundle.
     { "ref": "<fragment-1>", "kind": "component", "purpose": "recurring titled note",
       "blocks": [ { "type": "callout", "intent": "note",
                     "runs": [ { "t": "{{body}}" } ] } ] }
-  ]
+  ],
+  "palette_annotations": {
+    "<color-1>": { "name": "primary brand color", "semantic_role": "accent",
+                   "purpose": "headings and key emphasis",
+                   "use_when": "drawing attention to a section title" }
+  }
 }
 ```
+
+The `<color-1>` key is a verbatim **palette id** from the bundle's `palette`
+inventory (a theme slot like `accent1`, or `hex:RRGGBB`). The `name` / `purpose` /
+`use_when` / `semantic_role` are advisory free text you write for a human; you
+**never** author a color value - the deterministic capture owns the actual
+`ref`/hex, and the merge mirrors your names onto `theme.palette` without ever
+touching the captured color.
 
 ## Format readiness
 

@@ -7,13 +7,15 @@ from pathlib import Path
 from typing import Optional
 
 from docx import Document
+from docx.enum.dml import MSO_THEME_COLOR
 from docx.opc.constants import RELATIONSHIP_TYPE
 from docx.opc.packuri import PackURI
 from docx.opc.part import Part
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn
-from docx.shared import Emu
+from docx.shared import Emu, Pt, RGBColor
 
+from brandkit.common import color as colorutil
 from brandkit.common import text as textutil
 from brandkit.common.links import is_safe_link_url
 from brandkit.formats.docx import cover, structure
@@ -100,14 +102,23 @@ def generate(
     # floor below.
     cleared_anchors = cover.compose_cover(doc, idoc.cover, profile, findings=sink)
 
-    # Write the body blocks in the order given (the body region is freeform).
+    # Write the body blocks in the order given (the body region is freeform). The
+    # caption indexer threads SEQ numbering through every caption so a KEPT caption
+    # index (table-of-tables / -figures) can regenerate from the new content.
     resolver = ProfileResolver(profile)
+    caption_ctx = _build_caption_indexer(profile)
     for block in idoc.blocks:
-        _write_block(doc, resolver, block, sink)
+        _write_block(doc, resolver, block, sink, caption_ctx)
 
     # Keep the visible TOC field cache aligned for renderers that do not update
     # fields in headless export. The field itself remains dirty/updateable.
     structure.refresh_visible_outline_toc_cache(doc, _outline_headings(idoc.blocks))
+
+    # Rebuild every KEPT caption index's visible cache from the captions just emitted
+    # (the SEQ classes the indexer collected), so a headless render shows the new
+    # entries instead of the template's stale ones. No-op when nothing was collected.
+    if caption_ctx is not None and caption_ctx.entries:
+        structure.refresh_visible_caption_index_cache(doc, caption_ctx.entries)
 
     # Refresh the preserved TOC (if any) so Word recomputes it on open - the new
     # headings written into the body will be picked up. No-op when there is no TOC.
@@ -288,24 +299,151 @@ def _apply_run_toggles(run, r: dict) -> None:
         run.font.subscript = True
 
 
-def _add_hyperlink(para, url: str, text: str, r: dict) -> None:
+def _resolve_run_color(
+    resolver: Optional[ProfileResolver],
+    token: Optional[str],
+    findings: Optional[list[Finding]],
+) -> Optional[dict]:
+    """Resolve a run's ``color`` palette TOKEN to its captured color ``ref`` object.
+
+    Returns the ``{'kind': 'theme'|'hex', ...}`` object the writers apply, or
+    ``None`` when there is no token, no resolver, or the token is unknown. An
+    UNRESOLVED token (present, but not a key of ``theme.palette``) is recorded as a
+    graceful INFO ``color_token_unresolved`` finding (the run is then left to inherit
+    its color, mirroring ``appearance_color_skipped``) - the writer NEVER fabricates
+    a color for an unknown token. The token itself never carries a literal color
+    (``normalize_runs`` already rejected any hex-shaped value structurally)."""
+    if not token or resolver is None:
+        return None
+    color = resolver.resolve_color(token)
+    if color is None and findings is not None:
+        findings.append(
+            Finding(
+                "color_token_unresolved",
+                schema.Severity.INFO.value,
+                f"run color token {token!r} is not a key of theme.palette; "
+                "left inherited",
+            )
+        )
+    return color
+
+
+def _inject_hyperlink_run_color(rpr, color: Optional[dict]) -> None:
+    """Inject the resolved run COLOR onto a raw-XML hyperlink ``w:rPr``, gated on an
+    ABSENT ``w:color`` so re-runs stay byte-identical (exactly like the ``w:rFonts``
+    injection above it).
+
+    A hex ref writes ``w:color@w:val`` (normalized RRGGBB); a theme-token ref writes
+    ``w:color@w:themeColor`` via the CLOSED :data:`_WML_TOKEN_TO_THEME_COLOR` map (the
+    WordprocessingML themeColor token). A theme token outside that closed map, or a
+    malformed hex, is SKIPPED (the link stays inherited) rather than risking invalid
+    XML - the value comes STRICTLY from the resolved palette ref, never a literal."""
+    if not color or rpr.find(qn("w:color")) is not None:
+        return
+    kind = color.get("kind")
+    if kind == "hex":
+        hexval = color.get("hex")
+        if not hexval:
+            return
+        try:
+            normalized = colorutil.normalize_hex(hexval)
+        except (ValueError, AttributeError):
+            return
+        _link_color_element(rpr).set(qn("w:val"), normalized)
+        return
+    if kind == "theme":
+        token = color.get("theme")
+        member = _WML_TOKEN_TO_THEME_COLOR.get(token)
+        hexval = color.get("hex")
+        if member is None:
+            # No WordprocessingML themeColor member (a clrScheme-slot token like
+            # dk1/lt1/hlink): realize the brand color via the resolver-supplied hex
+            # rather than dropping the link to inherited.
+            if hexval:
+                try:
+                    normalized = colorutil.normalize_hex(hexval)
+                except (ValueError, AttributeError):
+                    return
+                _link_color_element(rpr).set(qn("w:val"), normalized)
+            return
+        el = _link_color_element(rpr)
+        # python-docx's themeColor attribute carries the SAME WML token the closed
+        # map is keyed on; write it back verbatim. Also carry the resolved hex in
+        # w:val (from the palette ref, never a literal) so renderers that ignore a
+        # run themeColor still show the brand color; Word uses the themeColor. With
+        # no resolved hex, emit themeColor only (no w:val) so a renderer that reads
+        # w:val does not paint the link black.
+        el.set(qn("w:themeColor"), member.xml_value)
+        if hexval:
+            try:
+                el.set(qn("w:val"), colorutil.normalize_hex(hexval))
+            except (ValueError, AttributeError):
+                pass
+
+
+def _link_color_element(rpr):
+    """Return ``rpr``'s ``w:color`` inserted at the schema-correct position, cleared.
+
+    ``CT_RPr.get_or_add_color`` places ``w:color`` BEFORE ``w:u``/``w:sz``/
+    ``w:vertAlign`` (a raw ``rpr.append`` would emit non-conformant run-property
+    child order on an underlined/super-scripted link). python-docx seeds the new
+    element with a default ``w:val="000000"``, so clear it: the caller then writes
+    ONLY the attributes it intends, and a theme-token-without-hex link is not painted
+    black by a renderer that reads ``w:val``. Caller guards on an absent ``w:color``,
+    so this never duplicates and re-runs stay byte-identical.
+    """
+    el = rpr.get_or_add_color()
+    el.attrib.pop(qn("w:val"), None)
+    return el
+
+
+def _add_hyperlink(
+    para,
+    url: str,
+    text: str,
+    r: dict,
+    latin: Optional[str] = None,
+    *,
+    color: Optional[dict] = None,
+    findings: Optional[list[Finding]] = None,
+) -> None:
     """Append a real ``w:hyperlink`` (external relationship) carrying ``text``.
 
     The link target is the author's URL (content, not brand), wired through a
     package relationship. The visible run keeps the author's inline emphasis; we do
     not inject a literal ``Hyperlink`` character style or color (brand guarantee).
 
+    A hyperlink run is raw ``w:r`` XML appended under the ``w:hyperlink`` element, so
+    it is NOT a python-docx ``Run`` and ``_apply_appearance`` (which iterates
+    ``para.runs``) never reaches it. When the resolved op carries a captured brand
+    font (``latin``), brand the run here by injecting ``w:rPr/w:rFonts`` with ONLY
+    ``w:ascii`` + ``w:hAnsi`` - exactly what python-docx's ``run.font.name`` writes
+    (no ``w:cs``), so the link text matches the surrounding branded runs. ``latin``
+    is read STRICTLY from the resolver op (never a literal). The rFonts is injected
+    only when absent, so re-runs stay byte-identical.
+
+    ``color`` (when given) is the resolved palette ref for this run's ``color`` token.
+    For the raw-XML link run it is injected as ``w:color`` (hex ``w:val`` or theme
+    ``w:themeColor``) on the rPr, gated on absent like ``w:rFonts``; for an unsafe-url
+    link (a python-docx run) it goes through the shared ``_brand_run_color``. The
+    value comes STRICTLY from the resolved palette ref - never a literal.
+
     An UNSAFE scheme (``file:``/``smb:``/``javascript:``/``data:``/...) is neutralized:
-    the author's TEXT is kept (emphasis preserved) but the dangerous target is not
-    wired, so untrusted content cannot smuggle a hostile link into the document.
+    the author's TEXT is kept (emphasis preserved, and branded via the python-docx
+    run) but the dangerous target is not wired, so untrusted content cannot smuggle a
+    hostile link into the document.
     """
     if not is_safe_link_url(url):
-        _apply_run_toggles(para.add_run(text), r)
+        run = para.add_run(text)
+        _apply_run_toggles(run, r)
+        _brand_run_font(run, latin)
+        _brand_run_color(run, color, findings if findings is not None else [])
         return
     r_id = para.part.relate_to(url, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("r:id"), r_id)
     run = OxmlElement("w:r")
+    rpr: Optional[object] = None
     if any(r.get(k) for k in ("b", "i", "u", "strike", "sup", "sub")):
         rpr = OxmlElement("w:rPr")
         for key, tag in (("b", "w:b"), ("i", "w:i"), ("strike", "w:strike")):
@@ -319,6 +457,24 @@ def _add_hyperlink(para, url: str, text: str, r: dict) -> None:
             va = OxmlElement("w:vertAlign")
             va.set(qn("w:val"), "superscript" if r.get("sup") else "subscript")
             rpr.append(va)
+    # Brand the link run with the captured font (rFonts ascii+hAnsi only, matching
+    # python-docx's run.font.name), gated on an ABSENT w:rFonts so re-runs are
+    # byte-identical. The font value comes only from the resolver op (no literal).
+    if latin:
+        if rpr is None:
+            rpr = OxmlElement("w:rPr")
+        if rpr.find(qn("w:rFonts")) is None:
+            rfonts = OxmlElement("w:rFonts")
+            rfonts.set(qn("w:ascii"), latin)
+            rfonts.set(qn("w:hAnsi"), latin)
+            rpr.insert(0, rfonts)
+    # Inject the resolved run color (w:color), gated on absent like w:rFonts above,
+    # so a colored hyperlink token reaches the raw-XML link run too.
+    if color:
+        if rpr is None:
+            rpr = OxmlElement("w:rPr")
+        _inject_hyperlink_run_color(rpr, color)
+    if rpr is not None:
         run.append(rpr)
     t = OxmlElement("w:t")
     t.set(qn("xml:space"), "preserve")
@@ -328,22 +484,164 @@ def _add_hyperlink(para, url: str, text: str, r: dict) -> None:
     para._p.append(hyperlink)
 
 
-def _add_runs(para, runs) -> None:
+def _add_runs(
+    para,
+    runs,
+    latin: Optional[str] = None,
+    *,
+    resolver: Optional[ProfileResolver] = None,
+    findings: Optional[list[Finding]] = None,
+) -> None:
     """Write IR ``runs`` into ``para`` as real docx runs, preserving inline emphasis
-    and hyperlinks, instead of flattening to a single plain run."""
+    and hyperlinks, instead of flattening to a single plain run.
+
+    ``latin`` (when given) is the captured brand font of the resolved op for this
+    paragraph; it is applied to plain runs and to hyperlink runs at write time so the
+    branding reaches even the raw-XML hyperlink run ``_apply_appearance`` cannot see.
+    Plain (non-hyperlink) runs added here are also branded by the post-write
+    ``_apply_appearance`` pass; the guard (set only when absent) makes that a no-op.
+
+    ``resolver`` (when given) enables model-driven run COLOR: a run carrying a
+    ``color`` palette TOKEN has it resolved to a captured ref via
+    ``resolver.resolve_color`` and applied here through the EXISTING
+    ``_brand_run_color`` (whose ``run.font.color.type is None`` guard gives the
+    explicit token first-writer-wins precedence over the later ``_apply_appearance``
+    body/role default, and keeps re-runs byte-identical). An UNRESOLVED token is left
+    inherited + an INFO ``color_token_unresolved`` finding. No resolver -> no per-run
+    color (the body/role default still applies via ``_apply_appearance``)."""
+    sink = findings if findings is not None else []
     for r in runs or []:
         text = str(r.get("t", ""))
         link = r.get("link")
+        color = _resolve_run_color(resolver, r.get("color"), findings)
         if link and text:
-            _add_hyperlink(para, link, text, r)
+            _add_hyperlink(para, link, text, r, latin, color=color, findings=findings)
         elif text:
-            _apply_run_toggles(para.add_run(text), r)
+            run = para.add_run(text)
+            _apply_run_toggles(run, r)
+            _brand_run_font(run, latin)
+            _brand_run_color(run, color, sink)
 
 
-def _para_with_runs(doc, runs):
-    """Add a paragraph carrying ``runs`` as real, formatting-preserving docx runs."""
+def _para_with_runs(
+    doc,
+    runs,
+    latin: Optional[str] = None,
+    *,
+    resolver: Optional[ProfileResolver] = None,
+    findings: Optional[list[Finding]] = None,
+):
+    """Add a paragraph carrying ``runs`` as real, formatting-preserving docx runs.
+
+    ``resolver`` / ``findings`` (when given) thread model-driven run color into
+    ``_add_runs`` so a run's ``color`` palette token is resolved and applied."""
     para = doc.add_paragraph()
-    _add_runs(para, runs)
+    _add_runs(para, runs, latin, resolver=resolver, findings=findings)
+    return para
+
+
+class _CaptionIndexer:
+    """SEQ numbering + visible-cache entries for the KEPT caption indexes.
+
+    Maps a caption's ``target`` (table/figure) to the opaque ``seq_id`` of the
+    comprehension's matching kept caption index (via its model-authored
+    ``caption_target``), so the generator can emit a real Word ``SEQ`` field that the
+    index's ``\\c`` switch collects - brand-agnostic, no language heuristic on the seq
+    name. Accumulates the visible entry text per seq for the post-body cache refresh.
+    """
+
+    def __init__(self, target_to_seq: dict) -> None:
+        self.target_to_seq = target_to_seq
+        self._counts: dict = {}
+        self.entries: dict = {}
+
+    def seq_for(self, target: Optional[str]) -> Optional[str]:
+        return self.target_to_seq.get(target) if target else None
+
+    def emit(self, seq: str, text: str) -> int:
+        """Record the next caption of class ``seq``; return its 1-based number."""
+        n = self._counts.get(seq, 0) + 1
+        self._counts[seq] = n
+        self.entries.setdefault(seq, []).append(f"{seq} {n}. {text}".rstrip())
+        return n
+
+
+def _build_caption_indexer(profile: dict) -> Optional["_CaptionIndexer"]:
+    """Build the caption indexer from the KEPT caption indexes in the comprehension.
+
+    An index participates only when it is KEPT (``reconcile`` != ``clear``) AND carries
+    a ``seq_id`` AND a model-authored ``caption_target`` (the table/figure kind that
+    feeds it). A cleared index is gone; an index with no target cannot be mapped to a
+    caption kind. Returns None when no kept caption index opts in - captions then render
+    as plain styled text (the prior behavior), so SEQ emission is strictly additive.
+    """
+    comp = profile.get("comprehension")
+    if not store.comprehension_is_present(profile) or not isinstance(comp, dict):
+        return None
+    target_to_seq: dict = {}
+    for idx in (comp.get("conventions") or {}).get("indexes") or []:
+        if not isinstance(idx, dict):
+            continue
+        if idx.get("reconcile") == schema.Reconcile.CLEAR.value:
+            continue
+        seq = idx.get("seq_id")
+        target = idx.get("caption_target")
+        if seq and target in schema.CAPTION_TARGETS:
+            target_to_seq.setdefault(target, seq)
+    return _CaptionIndexer(target_to_seq) if target_to_seq else None
+
+
+def _plain_run_el(text: str):
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.set(qn("xml:space"), "preserve")
+    t.text = text
+    r.append(t)
+    return r
+
+
+def _prepend_caption_seq(para, seq_id: str, number: int) -> None:
+    r"""Prepend ``<seq_id> {SEQ <seq_id> \* ARABIC}. `` to a caption paragraph.
+
+    Emits a REAL Word SEQ field (cached value ``number``) so the template's
+    ``TOC \c "<seq_id>"`` caption index collects this caption on a field update, and so
+    the visible label matches the template's own caption convention (the label IS the
+    seq identifier the template author chose - read from the comprehension, never a
+    literal). The body is rebuilt from scratch each generation, so the cached number is
+    deterministic and re-runs stay byte-identical.
+    """
+    p = para._p
+    pPr = p.find(qn("w:pPr"))
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), f" SEQ {seq_id} \\* ARABIC ")
+    fld.append(_plain_run_el(str(number)))
+    nodes = [_plain_run_el(f"{seq_id} "), fld, _plain_run_el(". ")]
+    if pPr is not None:
+        ref = pPr
+        for node in nodes:
+            ref.addnext(node)
+            ref = node
+    else:
+        for node in reversed(nodes):
+            p.insert(0, node)
+
+
+def _emit_caption(doc, resolver, runs, target, caption_ctx, findings):
+    """Write a caption paragraph; when a kept caption index claims ``target``, prepend
+    a label + SEQ field so the index regenerates from the new content.
+
+    The SEQ prefix is added BEFORE the role style/appearance pass, so the label and
+    separator runs carry the same brand caption styling as the caption text.
+    """
+    op = resolver.resolve_role("caption")
+    para = _para_with_runs(
+        doc, runs, _op_latin(op), resolver=resolver, findings=findings
+    )
+    seq = caption_ctx.seq_for(target) if caption_ctx is not None else None
+    if seq:
+        number = caption_ctx.emit(seq, textutil.runs_to_text(runs).strip())
+        _prepend_caption_seq(para, seq, number)
+    _apply_resolved_style(doc, para, op, findings)
     return para
 
 
@@ -352,35 +650,55 @@ def _write_block(
     resolver: ProfileResolver,
     block: ir.Block,
     findings: list[Finding],
+    caption_ctx: Optional["_CaptionIndexer"] = None,
 ) -> None:
+    # Compute the resolved op first so the captured brand font reaches even the raw-
+    # XML hyperlink runs (threaded via _op_latin into _add_runs); plain runs are also
+    # branded by the post-write _apply_appearance pass, whose set-only-when-unset
+    # guard makes the double-touch a no-op (re-runs stay byte-identical).
     if isinstance(block, ir.Heading):
-        para = _para_with_runs(doc, block.runs)
-        _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
+        op = resolver.resolve_block(block)
+        para = _para_with_runs(
+            doc, block.runs, _op_latin(op), resolver=resolver, findings=findings
+        )
+        _apply_resolved_style(doc, para, op, findings)
     elif isinstance(block, ir.Paragraph):
-        para = _para_with_runs(doc, block.runs)
-        _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
+        op = resolver.resolve_block(block)
+        para = _para_with_runs(
+            doc, block.runs, _op_latin(op), resolver=resolver, findings=findings
+        )
+        _apply_resolved_style(doc, para, op, findings)
     elif isinstance(block, ir.Callout):
+        op = resolver.resolve_block(block)
+        latin = _op_latin(op)
         para = doc.add_paragraph()
         if block.title:
-            _add_runs(para, block.title)
+            _add_runs(para, block.title, latin, resolver=resolver, findings=findings)
             para.add_run().add_break()  # title above body, same callout paragraph
-        _add_runs(para, block.runs)
-        _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
+        _add_runs(para, block.runs, latin, resolver=resolver, findings=findings)
+        _apply_resolved_style(doc, para, op, findings)
     elif isinstance(block, ir.ListBlock):
         _write_list_items(doc, resolver, block, block.items, findings)
     elif isinstance(block, ir.Table):
-        _write_table(doc, resolver, block, findings)
+        _write_table(doc, resolver, block, findings, caption_ctx)
     elif isinstance(block, ir.Caption):
-        para = _para_with_runs(doc, block.runs)
-        _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
+        _emit_caption(doc, resolver, block.runs, block.target, caption_ctx, findings)
     elif isinstance(block, ir.Quote):
-        para = _para_with_runs(doc, block.runs)
-        _apply_resolved_style(doc, para, resolver.resolve_block(block), findings)
+        op = resolver.resolve_block(block)
+        para = _para_with_runs(
+            doc, block.runs, _op_latin(op), resolver=resolver, findings=findings
+        )
+        _apply_resolved_style(doc, para, op, findings)
         if block.attribution:
-            attr = _para_with_runs(doc, block.attribution)
-            _apply_resolved_style(
-                doc, attr, resolver.resolve_role("paragraph"), findings
+            attr_op = resolver.resolve_role("paragraph")
+            attr = _para_with_runs(
+                doc,
+                block.attribution,
+                _op_latin(attr_op),
+                resolver=resolver,
+                findings=findings,
             )
+            _apply_resolved_style(doc, attr, attr_op, findings)
     elif isinstance(block, ir.PageBreak):
         doc.add_page_break()
     elif isinstance(block, ir.Divider):
@@ -397,7 +715,7 @@ def _write_block(
         pbdr.append(bottom)
         para._p.get_or_add_pPr().append(pbdr)
     elif isinstance(block, ir.Image):
-        _write_image(doc, resolver, block, findings)
+        _write_image(doc, resolver, block, findings, caption_ctx)
     elif isinstance(block, ir.Kpi):
         _write_kpi(doc, resolver, block, findings)
     elif isinstance(block, ir.Chart):
@@ -486,7 +804,7 @@ def _write_kpi(doc, resolver, block, findings) -> None:
     )
 
 
-def _write_image(doc, resolver, block, findings) -> None:
+def _write_image(doc, resolver, block, findings, caption_ctx=None) -> None:
     """Place an ``Image`` block as an inline picture, sized to the section's content
     width when no explicit size hint is given, with its caption below.
 
@@ -526,8 +844,7 @@ def _write_image(doc, resolver, block, findings) -> None:
         )
         return
     if block.caption:
-        para = _para_with_runs(doc, block.caption)
-        _apply_resolved_style(doc, para, resolver.resolve_role("caption"), findings)
+        _emit_caption(doc, resolver, block.caption, "figure", caption_ctx, findings)
 
 
 _CHART_CONTENT_TYPE = (
@@ -698,7 +1015,9 @@ def _write_list_items(doc, resolver, block, items, findings) -> None:
     """
     for item in items:
         op = resolver.resolve_list_item(block, item)
-        para = _para_with_runs(doc, item.runs)
+        para = _para_with_runs(
+            doc, item.runs, _op_latin(op), resolver=resolver, findings=findings
+        )
         _apply_resolved_style(doc, para, op, findings)
         _apply_list_numbering(para, op, item)
         if item.items:
@@ -738,7 +1057,7 @@ def _apply_list_numbering(para, op, item) -> None:
     pPr.append(numPr)
 
 
-def _write_table(doc, resolver, block, findings) -> None:
+def _write_table(doc, resolver, block, findings, caption_ctx=None) -> None:
     # Honor colspan/rowspan: size the grid by span-expanded width, then merge.
     # Header cells are a flat run list (one column each), so the header width is
     # simply the column count.
@@ -747,11 +1066,21 @@ def _write_table(doc, resolver, block, findings) -> None:
     cols = max([header_width] + body_widths + [1])
     rows = len(block.rows) + (1 if block.columns else 0)
     table = doc.add_table(rows=rows, cols=cols)
-    _apply_table_style(doc, table, resolver.resolve_block(block), findings)
+    # The table.default ResolvedOp ALREADY carries appearance (the role's own font, or
+    # the document body font as the resolver's fallback). A cell paragraph carries no
+    # python-docx style, so its runs are never reached by ``_apply_appearance``; brand
+    # them at write time from this one resolved op (never a fabricated cell font).
+    # KPI / SmartArt synthetic tables route through here, so they inherit it for free.
+    table_op = resolver.resolve_block(block)
+    _apply_table_style(doc, table, table_op, findings)
+    cell_latin = _op_latin(table_op)
 
     header_op = resolver.resolve_role(
         schema.role_id("table", (block.role or "default"), "header"), fallback=None
     )
+    # A header cell prefers the header role's own captured font (role wins), falling
+    # back to the table-body font; both come only from the resolver.
+    header_latin = _op_latin(header_op) or cell_latin
     row_offset = 0
     if block.columns:
         _fill_row(
@@ -761,20 +1090,55 @@ def _write_table(doc, resolver, block, findings) -> None:
             [_as_cell(c) for c in block.columns],
             header_op,
             findings,
+            cell_latin=cell_latin,
+            header_latin=header_latin,
             force_header=True,
+            resolver=resolver,
         )
         row_offset = 1
     for r_idx, row in enumerate(block.rows):
-        _fill_row(doc, table, r_idx + row_offset, row, header_op, findings)
+        _fill_row(
+            doc,
+            table,
+            r_idx + row_offset,
+            row,
+            header_op,
+            findings,
+            cell_latin=cell_latin,
+            header_latin=header_latin,
+            resolver=resolver,
+        )
     if block.caption:
-        para = _para_with_runs(doc, block.caption)
-        _apply_resolved_style(doc, para, resolver.resolve_role("caption"), findings)
+        _emit_caption(doc, resolver, block.caption, "table", caption_ctx, findings)
 
 
 def _fill_row(
-    doc, table, r_idx, cells, header_op, findings, *, force_header=False
+    doc,
+    table,
+    r_idx,
+    cells,
+    header_op,
+    findings,
+    *,
+    cell_latin=None,
+    header_latin=None,
+    force_header=False,
+    resolver: Optional[ProfileResolver] = None,
 ) -> None:
-    """Fill one logical row, honoring colspan/rowspan by merging grid cells."""
+    """Fill one logical row, honoring colspan/rowspan by merging grid cells.
+
+    Each cell paragraph's runs are branded with the captured font as they are written
+    (``cell_latin`` for body cells, ``header_latin`` for header cells - both resolved
+    from the profile by ``_write_table``, never a literal), so cell text, hyperlinks
+    included, carries the brand typeface.
+
+    CONTRACT - table cells receive the FONT axis only. Run SIZE and COLOR follow the
+    resolver's family gate (``_allows_body_default``): the document body size/color
+    default is intentionally NOT pushed onto the ``table.*`` family - exactly as for
+    ``heading.*`` - so a table never has the body size/color forced over its own table
+    style's intrinsic size/color. A ``table``/header role that itself captured a
+    size/color still gets it (role-specific values apply to any role) via the header
+    cell's ``_apply_resolved_style`` -> ``_apply_appearance`` pass."""
     c_cursor = 0
     ncols = len(table.columns)
     for cell in cells:
@@ -788,14 +1152,17 @@ def _fill_row(
             end_c = min(c_cursor + cspan - 1, ncols - 1)
             end_r = min(r_idx + rspan - 1, len(table.rows) - 1)
             anchor = anchor.merge(table.cell(end_r, end_c))
+        is_header = force_header or getattr(cell, "header", False)
         # Run-aware cell text: a fresh cell has one empty paragraph; write the IR
         # runs into it so inline emphasis/links survive (not a flattened cell.text).
-        _add_runs(anchor.paragraphs[0], cell.runs)
-        if (
-            (force_header or getattr(cell, "header", False))
-            and header_op is not None
-            and header_op.resolver
-        ):
+        _add_runs(
+            anchor.paragraphs[0],
+            cell.runs,
+            header_latin if is_header else cell_latin,
+            resolver=resolver,
+            findings=findings,
+        )
+        if is_header and header_op is not None and header_op.resolver:
             for para in anchor.paragraphs:
                 _apply_resolved_style(doc, para, header_op, findings)
         c_cursor += cspan
@@ -848,30 +1215,192 @@ def _apply_style(
                 f"{label.strip() or 'matching'} role to brand it",
             )
         )
-    # Apply the role's captured typography (font family) on top of the style. No-op
-    # for tables (no runs here) and for profiles with no captured appearance.
-    _apply_appearance(target_obj, op)
+    # Apply the role's captured typography (font/size/color) on top of the style.
+    # No-op for tables (no runs here) and for profiles with no captured appearance.
+    _apply_appearance(target_obj, op, findings)
 
 
-def _apply_appearance(target_obj, op) -> None:
-    """Apply captured brand typography (font family) from the profile as direct run
-    formatting on a paragraph's runs.
+def _op_latin(op) -> Optional[str]:
+    """The captured brand latin font this resolved op applies, or ``None``.
 
     The brand value comes ONLY from ``op.appearance`` (which the resolver populated
     from the profile, role-specific font winning over the document body font), never
     from a literal in this writer, so off-brand output stays impossible by
-    construction. Tables expose no ``runs`` here and are skipped; a run that already
-    carries an explicit font is left alone (the IR never sets fonts, so runs are
-    unfonted and inherit - we brand them)."""
-    latin = (getattr(op, "appearance", None) or {}).get("font", {}).get("latin")
-    if not latin:
+    construction. ``None`` for every pre-capture profile (empty appearance)."""
+    return (getattr(op, "appearance", None) or {}).get("font", {}).get("latin")
+
+
+def _op_size_hp(op) -> Optional[int]:
+    """The captured brand run SIZE (half-points) this resolved op applies, or ``None``.
+
+    Read STRICTLY from ``op.appearance`` (resolver-populated from the profile,
+    role-specific size winning over the document body size). The body size only ever
+    reaches the body/paragraph family - the resolver's family gate keeps it off
+    headings - so a heading's intrinsic style size is never overridden here."""
+    return (getattr(op, "appearance", None) or {}).get("size_hp")
+
+
+def _op_color(op) -> Optional[dict]:
+    """The captured brand run COLOR this resolved op applies (a ``{'kind': ...}``
+    object), or ``None``.
+
+    Read STRICTLY from ``op.appearance``. Like size, the body color reaches only the
+    body/paragraph family via the resolver's family gate, so a heading's intrinsic
+    style color is never overridden here."""
+    return (getattr(op, "appearance", None) or {}).get("color")
+
+
+# The WordprocessingML themeColor tokens python-docx emits (``MSO_THEME_COLOR``
+# ``.xml_value``) keyed back to their enum member, so a captured theme-color token
+# can be applied via ``run.font.color.theme_color``. A CLOSED table (the same
+# tokens ``_run_color`` captures); a token outside it is SKIPPED at apply time
+# rather than risking a raise.
+_WML_TOKEN_TO_THEME_COLOR = {
+    member.xml_value: member
+    for member in MSO_THEME_COLOR
+    if getattr(member, "xml_value", None)
+    and member is not MSO_THEME_COLOR.NOT_THEME_COLOR
+}
+
+
+def _brand_run_font(run, latin: Optional[str]) -> None:
+    """Set ``run.font.name`` to the captured ``latin`` ONLY when the run carries no
+    explicit font (the exact v1 guard).
+
+    The IR never sets fonts, so authored runs are unfonted and inherit - we brand
+    them; a run that already carries an explicit font is left alone, which also keeps
+    re-runs byte-identical (the name is set only when absent). A falsy ``latin`` (a
+    pre-capture profile) is a no-op."""
+    if latin and run.font.name is None:
+        run.font.name = latin
+
+
+def _brand_run_size(run, size_hp: Optional[int]) -> None:
+    """Set ``run.font.size`` from the captured ``size_hp`` (half-points) ONLY when the
+    run carries no explicit size (the per-axis guard).
+
+    ``run.font.size`` is ``None`` when inherited; we set it from the half-point bucket
+    (``Pt(size_hp / 2)``) only then, so a run with its own explicit size is left alone
+    and re-runs stay byte-identical. A falsy ``size_hp`` is a no-op."""
+    if size_hp and run.font.size is None:
+        run.font.size = Pt(size_hp / 2)
+
+
+def _brand_run_color(run, color: Optional[dict], findings: list[Finding]) -> None:
+    """Set ``run.font.color`` from the captured ``color`` object ONLY when the run
+    carries no explicit color (``run.font.color.type is None``) (the per-axis guard).
+
+    A hex color is applied via ``run.font.color.rgb``; a theme-token color is mapped
+    through the CLOSED :data:`_WML_TOKEN_TO_THEME_COLOR` table to an
+    ``MSO_THEME_COLOR`` member and applied via ``run.font.color.theme_color``. A
+    token that does not map is SKIPPED with an INFO finding rather than letting a bad
+    apply raise. The value is read STRICTLY from the resolver op (never a literal);
+    a falsy ``color`` is a no-op."""
+    if not color or run.font.color.type is not None:
         return
-    runs = getattr(target_obj, "runs", None)
-    if not runs:
+    kind = color.get("kind")
+    if kind == "hex":
+        hexval = color.get("hex")
+        if hexval:
+            # Normalize (#rrggbb / 3-digit / any case) exactly as the verify side
+            # does, and fail CLOSED on a truly malformed hex (INFO skip, never a
+            # raise that would abort generation) - mirrors the theme-token branch.
+            try:
+                run.font.color.rgb = RGBColor.from_string(
+                    colorutil.normalize_hex(hexval)
+                )
+            except (ValueError, AttributeError):
+                findings.append(
+                    Finding(
+                        "appearance_color_skipped",
+                        schema.Severity.INFO.value,
+                        f"captured hex color {hexval!r} is not a valid RRGGBB; "
+                        "left inherited",
+                    )
+                )
         return
-    for run in runs:
-        if run.font.name is None:
-            run.font.name = latin
+    if kind == "theme":
+        token = color.get("theme")
+        member = _WML_TOKEN_TO_THEME_COLOR.get(token)
+        if member is None:
+            # A clrScheme-slot token (dk1/lt1/hlink ...) has no WordprocessingML
+            # themeColor member, but the resolver enriched it with the concrete hex:
+            # realize the brand color via the hex rather than dropping it to inherited.
+            hexval = color.get("hex")
+            if hexval:
+                try:
+                    run.font.color.rgb = RGBColor.from_string(
+                        colorutil.normalize_hex(hexval)
+                    )
+                    return
+                except (ValueError, AttributeError):
+                    pass
+            findings.append(
+                Finding(
+                    "appearance_color_skipped",
+                    schema.Severity.INFO.value,
+                    f"captured theme color token {token!r} does not map to a "
+                    "WordprocessingML theme color and has no resolvable hex; "
+                    "left inherited",
+                )
+            )
+            return
+        run.font.color.theme_color = member
+        # Carry the resolved hex in w:color@w:val ALONGSIDE the themeColor so a
+        # renderer that ignores a run-level themeColor (headless LibreOffice) still
+        # shows the brand color instead of the black fallback; Word still uses the
+        # themeColor. The hex comes only from the resolved palette ref (no literal).
+        hexval = color.get("hex")
+        if hexval:
+            try:
+                normalized = colorutil.normalize_hex(hexval)
+            except (ValueError, AttributeError):
+                normalized = None
+            if normalized:
+                clr = run._element.get_or_add_rPr().find(qn("w:color"))
+                if clr is not None:
+                    clr.set(qn("w:val"), normalized)
+
+
+def _all_para_runs(target_obj) -> list:
+    """Every run in a paragraph, INCLUDING runs nested in a ``w:hyperlink``.
+
+    A hyperlink run is raw ``w:r`` XML under ``w:hyperlink`` and is NOT in
+    ``paragraph.runs`` - but modern python-docx exposes it via
+    ``paragraph.hyperlinks[*].runs``. Branding those too is what gives a link the
+    SAME size (and font/color) as the surrounding body text instead of leaving it at
+    the inherited default. Crash-safe: an object without ``hyperlinks`` (a table or
+    an older python-docx) just yields the direct runs."""
+    runs = list(getattr(target_obj, "runs", None) or [])
+    try:
+        for link in getattr(target_obj, "hyperlinks", None) or []:
+            runs.extend(getattr(link, "runs", None) or [])
+    except Exception:
+        pass
+    return runs
+
+
+def _apply_appearance(target_obj, op, findings: list[Finding]) -> None:
+    """Apply captured brand typography (font, size, color) from the profile as direct
+    run formatting on a paragraph's runs (hyperlink runs included).
+
+    The three axes are INDEPENDENT: each is applied only when the run's corresponding
+    attribute is unset (font when ``run.font.name`` is None; size when
+    ``run.font.size`` is None; color when ``run.font.color.type`` is None), so a role
+    carrying a size but no font (or a color but no font) still applies the axes it
+    has. Hyperlink runs are reached via :func:`_all_para_runs` so a link matches the
+    body size/font/color rather than rendering at the inherited default. Tables expose
+    no ``runs`` here and are skipped; the per-cell paragraphs are branded by the table
+    writer instead."""
+    latin = _op_latin(op)
+    size_hp = _op_size_hp(op)
+    color = _op_color(op)
+    if not (latin or size_hp or color):
+        return
+    for run in _all_para_runs(target_obj):
+        _brand_run_font(run, latin)
+        _brand_run_size(run, size_hp)
+        _brand_run_color(run, color, findings)
 
 
 def _apply_resolved_style(doc, para, op, findings: list[Finding]) -> None:

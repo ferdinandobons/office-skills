@@ -303,6 +303,17 @@ def compose_cover(
     if cover is None:
         return set()
 
+    # ORDERING (intentional): _sync_core_properties runs FIRST, and its
+    # _refresh_databound_sdt_caches fills + STRIPS w:showingPlcHdr on every cover SDT
+    # bound to a core title/subject leaf (it has just written the brand text into the
+    # binding, so the control is no longer a prompt). The comprehended path below
+    # therefore reads POST-SYNC placeholder state: for such a slot _fill_anchor_in_place
+    # sees was_placeholder=False and KEEPS the author's formatting (no role-style
+    # reassert), and _clear_is_corroborated returns False so a model CLEAR downgrades to
+    # KEEP+WARNING. Both are by design - the binding fill already wrote the brand text
+    # preserving the run rPr, and clearing a freshly bound slot would be
+    # self-contradictory. The placeholder gate reflecting post-sync state is the
+    # contract, exercised end-to-end by CoverDataBoundSdtComposeOrderingTest.
     _sync_core_properties(doc, cover)
 
     comp = _present_comprehension(profile)
@@ -321,18 +332,86 @@ def _sync_core_properties(doc, cover: Cover) -> None:
     render the generated cover.
     """
     props = getattr(doc, "core_properties", None)
-    if props is None:
-        return
     title = textutil.runs_to_text(cover.title or []) or str(
         cover.fields.get("title", "")
     )
     subtitle = textutil.runs_to_text(cover.subtitle or []) or str(
         cover.fields.get("subtitle", "")
     )
-    if title:
-        props.title = title
+    if props is not None:
+        if title:
+            props.title = title
+        if subtitle:
+            props.subject = subtitle
+    # Syncing core.xml is not enough for headless renderers: a content control
+    # bound to a core property renders its CACHED run text, not the re-resolved
+    # binding, so a stale prompt would survive in the body and in running
+    # headers/footers. Align every bound SDT's cache with the value we just wrote.
+    _refresh_databound_sdt_caches(doc, title, subtitle)
+
+
+def _iter_story_roots(doc):
+    """Yield the body element plus every header/footer part root (``w:hdr``/``w:ftr``).
+
+    Cover-bound content controls can live in running headers/footers (a company
+    template often repeats the document subject in the page header), not only in
+    the body. Returns each story's XML root so a single pass can reach every SDT.
+    """
+    yield doc.element.body
+    try:
+        parts = list(doc.part.package.iter_parts())
+    except Exception:  # pragma: no cover - defensive; package always iterable
+        return
+    for part in parts:
+        name = str(getattr(part, "partname", ""))
+        if "header" in name or "footer" in name:
+            el = getattr(part, "element", None)
+            if el is not None:
+                yield el
+
+
+def _refresh_databound_sdt_caches(doc, title: str, subtitle: str) -> None:
+    """Align the visible cache of every data-bound cover SDT with the synced value.
+
+    A content control whose ``w:dataBinding`` xpath targets a ``docProps/core.xml``
+    leaf displays the BOUND value. :func:`_sync_core_properties` updates that core
+    property, but headless LibreOffice renders the SDT's cached run text instead of
+    re-resolving the binding on export, so a stale prompt ("Titolo" / "Descrizione")
+    would linger in the body AND in repeated headers/footers. Overwrite each bound
+    SDT's cached text in place (dropping ``showingPlcHdr``) so the render matches
+    the binding. Brand-agnostic: the SDT is matched on the binding xpath's
+    core-property leaf (``title`` -> cover title, ``subject`` -> cover subtitle),
+    never on the placeholder words a particular template happens to use.
+    """
+    bindings: dict[str, str] = {}
     if subtitle:
-        props.subject = subtitle
+        bindings["subject"] = subtitle
+    if title:
+        bindings["title"] = title
+    if not bindings:
+        return
+    for root in _iter_story_roots(doc):
+        for sdt in root.iter(w("sdt")):
+            leaf = _databinding_leaf(_sdt_databinding(sdt))
+            value = bindings.get(leaf) if leaf else None
+            if value is not None:
+                _fill_sdt_title(sdt, value)
+
+
+def _databinding_leaf(xpath: Optional[str]) -> Optional[str]:
+    """Return the lowercased local element name of a data-binding xpath's last step.
+
+    The binding xpath targets a core-property leaf, e.g.
+    ``/ns1:coreProperties[1]/ns0:subject[1]`` -> ``subject``. Matching on the leaf
+    name (not a raw substring) keeps ``subject``/``title`` disjoint - a substring
+    test would wrongly fire ``title`` for a custom leaf named ``subtitle`` (which
+    contains ``title``). Returns None for an empty/absent xpath.
+    """
+    if not xpath:
+        return None
+    step = xpath.rsplit("/", 1)[-1]  # last path step, e.g. "ns0:subject[1]"
+    step = step.split("[", 1)[0]  # drop a positional predicate
+    return step.rsplit(":", 1)[-1].strip().lower()  # drop the namespace prefix
 
 
 def _present_comprehension(profile: dict) -> Optional[dict]:
@@ -599,17 +678,28 @@ def _fill_anchor_in_place(
     """FILL a cover anchor element in place, preserving run formatting.
 
     After the in-place fill, the slot's bound role style is re-asserted so a filled
-    cover slot is GUARANTEED brand-styled, not merely whatever incidental style the
-    prompt carried (D4). Both the SDT branch and the plain-paragraph branch now
-    re-apply the role style; the role is derived from the slot's ``binds_to``
+    cover slot is brand-styled rather than carrying whatever incidental style a bare
+    prompt had (D4). The role is derived from the slot's ``binds_to``
     (``title``->``cover.title``, ``subtitle``->``cover.subtitle``), a verbatim
     resolver target only - no literal.
+
+    The re-assertion is gated for an SDT: it fires only when the control was a bare
+    PLACEHOLDER before the fill (``showingPlcHdr``). A real, author-formatted slot
+    (not showing a placeholder) already carries the template's intended cover
+    styling, and stamping the role's auto-mapped paragraph style over it can replace
+    working direct formatting with a style that renders differently - e.g. a builtin
+    ``Subtitle`` whose color is a near-white ``text1`` tint, which blanks a filled
+    slot on a white page. For such a slot we fill text only and keep the author's
+    formatting (``_fill_sdt_title`` already preserves the run ``rPr``).
     """
     ln = _local_name(el.tag)
     role_id = _cover_role_for(binds_to)
     if ln == "sdt":
+        was_placeholder = _sdt_showing_placeholder(
+            el
+        )  # capture BEFORE the fill drops it
         _fill_sdt_title(el, content)
-        if role_id:
+        if role_id and was_placeholder:
             _apply_role_style_sdt(doc, el, profile, role_id)
     elif ln == "p":
         _fill_p_element_in_place(el, content)
