@@ -193,13 +193,18 @@ profile, so the same off-brand deviation recurs on every future generation.
 Add an explicit **ask-and-refine** step to the agent workflow, complementary to
 the machine-driven feedback loop in section 2 (which learns from QA findings):
 
-1. **Ask (agent guidance, `SKILL.md`).** After returning the generated file and the
-   QA summary, the agent asks the user a targeted question: *"Does this match your
-   template? Is anything off-brand or deviating from the original - a heading that
-   should be colored, a section that should not repeat, an element whose purpose I
-   read wrong?"* The question is grounded in what was actually extracted (it can
-   name the roles / palette entries / sections it used), so the user reacts to
-   concrete choices rather than a blank prompt.
+1. **Ask (agent guidance, `SKILL.md`).** The ask happens **only at the END of
+   generation** - after the generated file and the QA summary are returned, never
+   before or during. The skill explicitly tells the user that **feedback given as
+   text OR as a screenshot image** can help better define the final result for
+   **future** generations (it does not change the document just produced). A
+   screenshot is a first-class multimodal input: the model can *see* a deviation
+   from the template that deterministic QA cannot measure. The question is grounded
+   in what was actually extracted (it can name the roles / palette entries /
+   sections it used) and is concrete: *"Does this match your template? Is anything
+   off-brand or deviating from the original - a heading that should be colored, a
+   section that should not repeat, an element whose purpose I read wrong? Reply in
+   text or attach a screenshot, and I'll fold it into the profile for next time."*
 
 2. **Refine (model proposes).** The user's qualitative answer is turned by the model
    into structured refinements written **through the same fail-closed channels that
@@ -248,10 +253,126 @@ shipped: LibreOffice+Poppler+Pillow path, doctor preflight, PyMuPDF fallback,
 optional Tesseract OCR, deep/strict modes, manifest diagnostics, the L2 repair
 loop). Genuinely still-future items:
 
-- **Renderer-disagreement cross-check.** Compare `pdftoppm` vs PyMuPDF renders
-  (page count, dimensions, coarse ink maps) to flag rasterizer-specific artifacts.
+- **Renderer-disagreement cross-check.** ~~Compare `pdftoppm` vs PyMuPDF renders to
+  flag rasterizer-specific artifacts.~~ **Deprioritized (vetted 2026-06-09):** the
+  engine has only ONE layout engine (`soffice`); both `pdftoppm` and PyMuPDF
+  rasterize the *same* PDF, so the only detectable disagreement is rasterization
+  noise (anti-aliasing/hinting/DPI), not layout-fidelity defects. A real signal
+  needs a second independent layout engine (native Word/PowerPoint), a heavy new
+  dependency. Not worth the false-positive cost.
 - **Richer image analysis.** Add `numpy` + `opencv-python`/`scikit-image` to move
   L1 from pixel proxies to bounding-box / connected-component / overlap heuristics
   and template-vs-output diff heatmaps.
 - **OCR confidence scoring** and deeper stale TOC/field-cache detection
   (nested/multi-column TOCs, page-number-aware static entries).
+
+---
+
+## 5. Next-wave universal improvements (ideation synthesis, 2026-06-09)
+
+A vetted brainstorm (run after v0.7.0) of how to make the skill smarter, more
+faithful to a user's template, **universal across the 3 formats**, able to **learn
+from its own errors**, and to use the **model** for more evaluation/fixing. Every
+item below passed an adversarial gate on the two hard rules - **no fine-tuning on a
+single template (universal mechanism only)** and **off-brand impossible by
+construction** - and reuses an existing seam (resolver chokepoint, comprehension
+writer, `rules.overrides`, QA `Finding`/`QAReport`, `visual_manifest`). 19 of 20
+ideas survived; the 11 distinct buildable items cluster as below.
+
+**Two foundations gate almost everything else:** a **shared cross-format apply
+layer** (Cluster A) must precede per-format color/typography, and a **persisted
+generation report** (B1) must precede every learning move. Land those two, and the
+rest become small additive PRs.
+
+### Build order (top 5) and load-bearing dependencies
+
+1. **A1+A2+A3 - the cross-format appearance vertical** (capture -> shared apply core
+   -> format-neutral verify). Closes the stated KEY GAP (appearance/color/caption
+   apply is docx-only) and makes model-driven color universal for free. Ship A2+A3
+   in the **same** release (apply-parity without verify-parity breaks fail-closed).
+2. **B1 - persist `generation_report.json`** (feasibility S, purely additive):
+   unblocks the entire learning cluster (B2/B3/B4), C3, and E3's downstream value.
+3. **B3 - deterministic `learn` verb** writing `rules.overrides`: the first time the
+   engine acts on its own errors. Needs B1+B2.
+4. **C1 - persist the L2 visual-audit verdict**: the model's richest signal (it looks
+   at the rendered PNGs) currently evaporates each run. Independent of A/B.
+5. **D1 - paragraph-geometry appearance axis**: the biggest visible fidelity gain
+   below typography, reusing the `_dominant` + `_merge_appearance` + family-gate
+   machinery the A-cluster hardens.
+
+Arrows: `A2 -> per-format color, E2, cross-format halves of D1/D2/D3`;
+`A2 ships with A3`; `B1 -> B2 -> B3 -> B4` (strict chain); `B1 -> C3` and
+`B1 -> E3`; `E1 -> off-theme accents reachable by D1/E2`. C1/C2/C3 are a parallel
+model-in-the-loop track.
+
+### Cluster A - Cross-format universality (the unblocker)
+
+Fixes the KEY GAP: `appearance` v2, model-driven color, and caption-index regen
+APPLY on docx only (`check_appearance_targets` hard-gates on `Kind.DOCX`;
+`resolver.resolve_color`/`_merge_appearance` are already kind-agnostic but unconsumed
+by pptx/xlsx).
+
+| # | Item | Value | Seam reused | Feas | Why universal |
+|---|---|---|---|---|---|
+| **A1** | Per-format typography **capture** adapters | pptx/xlsx populate the same `role.appearance` + `theme.palette` shape docx fills, by walking placeholder runs / cell fonts under the existing `_dominant` floor | extract `_dominant`/`_color_obj`/`_palette_key` into `common/typography.py`; per-format `extract()` | M | pure dominance statistic over the template's own runs/cells; nothing privileged |
+| **A2** | Shared run-branding **apply** core `common/appearance.py` | pptx/xlsx finally consume `op.appearance` + `resolve_color`, set-only-when-unset | extract `_brand_run_*` to a neutral core | M | core reads zero template specifics; applies only what the resolver hands it |
+| **A3** | Format-neutral `check_appearance_targets` | one fail-closed verify proves every applied font/size/color against *each shell's own* facts, for all 3 kinds | lift the `Kind.DOCX` gate; per-kind shell-fact collectors | M | allowed set = whatever *this* shell proves, computed identically per kind |
+
+A1 -> A2 -> A3; **A2 and A3 in the same release**. Side effect: the model's
+`palette_annotations` naming (already inventory-parity on all 3 formats) becomes
+load-bearing on pptx/xlsx for the first time - model-driven color goes universal
+with no new model code.
+
+### Cluster B - Learn-from-errors (new capability; refines section 2)
+
+Nothing here exists today: `generation_report` is absent and `rules.overrides` is
+reserved (`schema.py`) with no reader/writer. Strict chain B1 -> B2 -> B3 -> B4.
+
+| # | Item | Value | Seam reused | Feas | Why universal |
+|---|---|---|---|---|---|
+| **B1** | Persist `generation_report.json` | serialize the `QAReport` (every `Finding` + shell sha + output/idoc hashes + ts) next to output | `visual_manifest` side-artifact pattern; generate verb | **S** | records check ids + shas, never template words |
+| **B2** | Cross-run regression findings (`regression.recurred`/`reintroduced`) | the recurrence signal the `learn` verb thresholds on | prior `generation_report.json`; `run_qa`; `source_shell_sha256` freeze | **S** | compares `(check, location)` multisets across same-shell runs only |
+| **B3** | Deterministic `learn` verb (Phase A) | distill unambiguous recurring findings into shell-bound `rules.overrides` re-points (reroute role / number_format / register_demo_clear) | `rules.overrides`; `resolve_role` last-resort; new `check_override_targets` mirroring `check_resolver_targets` | M | keys on stable check ids; re-points only to shell-defined artifacts (membership-checked) |
+| **B4** | Model-proposed corrections (Phase B) | model proposes corrections for the ambiguous remainder, routed through `comprehension.merge` into the same `rules.overrides` sink | bounded `generation_history` facts slice; comprehension single writer + `check_membership` | M-L | model only NAMES a shell-backed pointer; merge binds every proposal fail-closed |
+
+### Cluster C - Model-in-the-loop (widen the 2 model touchpoints to 3-4)
+
+Each persists a model judgement that is ephemeral today and re-validates it
+fail-closed via the comprehension `merge` writer or a sibling check.
+
+| # | Item | Value | Seam reused | Feas | Why universal |
+|---|---|---|---|---|---|
+| **C1** | L2 visual-audit verdict as a comprehension sub-block | persist per-checklist PASS/FAIL/NA + evidence; generate short-circuits the L2 round when all PASS at the current shell+content sha | additive `audit` sub-collection + `comprehension.merge`; new `check_audit_targets` | M | checklist ids derived purely from profile structure; model writes only a verdict against a structural id |
+| **C2** | Model-assisted QA triage | model adjudicates ambiguous WARNINGs (blank_page/edge_bleed/component_survival) as EXPECTED->INFO or DEFECT; never silences an ERROR | additive `triage` map keyed by `Finding.check`+location; `run_qa` severity-fold | M | binds to the engine's closed set of check ids; disposition is a closed enum |
+| **C3** | Interactive `refine` verb (see section 3) | turn a user's qualitative answer into a comprehension delta over existing sinks, confirm-as-diff | `comprehension.merge` (no schema change); `surface_inventories` binding | M | every binding is a verbatim `surface_inventories` id; a value the template never used cannot be named |
+
+**C3 constraint (per the user, see section 3):** the feedback ask happens **only at
+the end of generation**, invites **text or screenshot** feedback, and improves
+**future** generations - never the just-produced file.
+
+### Cluster D - Deeper template-following (fidelity below typography)
+
+Extend the proven dominant-capture + resolver-chokepoint + fail-closed-check pattern
+to new axes. Cross-format only once Cluster A's apply layer exists; on docx alone
+they can ship independently.
+
+| # | Item | Value | Seam reused | Feas | Why universal |
+|---|---|---|---|---|---|
+| **D1** | Paragraph geometry as a new appearance axis | capture+apply spacing / indent / `w:pBdr` / `w:shd` / tabs per role under the same `_dominant` floor | `capture_fonts` model; `role.appearance.geometry`; `_merge_appearance` + family gate; `check_geometry_targets` | M | reads only this template's `w:pPr` twips/borders; keeps a value only when it dominates |
+| **D2** | Table-style fidelity (banding / `tblLook` / cell margins) | enable the template's own `w:tblStylePr` banding + first/last emphasis via the captured `tblLook` bitmask; KPI-as-table inherits free | docx table writer; `role.appearance.table`; `check_table_targets` | **S** | reads conditional-format facts the template declares; fills stay in the shell's style part |
+| **D3** | List/numbering definition fidelity | capture per-level numFmt / lvlText / indent; clone the shell's own `w:abstractNum` by id | `structure.py` numbering readers; `role.appearance.numbering`; `check_numbering_targets` | M | clones the numbering def this template references, by id; never synthesized from JSON |
+
+### Cluster E - Faithfulness robustness (close known dead-ends)
+
+| # | Item | Value | Seam reused | Feas | Why universal |
+|---|---|---|---|---|---|
+| **E1** | Off-theme accent reachability via palette aliases | mint a syntactically-legal dotted token aliasing a model-named `hex:RRGGBB` palette entry, so off-theme brand accents become addressable run colors | `palette_annotations` -> `theme.palette`; `resolve_color` reads `ref` verbatim (zero resolver change); new L0 alias check | M | alias derived from the template's own captured palette entry; model proposes a name, engine copies the captured ref byte-identical |
+| **E2** | Faked-heading-in-body-style detection | surface body-style runs that are size/color outliers as a `pseudo_heading` fact; model adjudicates `promote_appearance_from` onto a real heading role | `comprehend_input_bundle` facts; `role_annotations`; `_merge_appearance`; `check_appearance_targets` | M | detector is a pure outlier test vs the captured dominant body appearance |
+| **E3** | Uniform `appearance_apply_degraded` finding | one stable INFO/WARNING whenever any format cannot realize a captured axis - makes parity gaps *measurable*, feeds the learning loop and the L2 model | `Finding`/`QAReport`; `DEFAULT_L0_INVARIANTS`; derived checklist item | **S** | fires on the structural fact that a captured axis was not realized; names only role id + axis |
+| **E4** | Universal cover synthesis for `AnchorKind.NONE` | build a cover from resolvable `cover.*` roles through `resolve_role` when no anchor exists; optional closed `cover_layout` enum lets the model authorize/order | `resolve_role` chokepoint; docx/pptx/xlsx cover write paths; QA finding | L | triggers off a structural fact (`kind==NONE`); builds only from inferred+validated roles; no-ops if none resolve |
+
+### Vetted and cut (recorded)
+
+- **Renderer-disagreement cross-check** - cut on feasibility (see section 4): one
+  layout engine means `pdftoppm` vs PyMuPDF differ only in rasterization noise, not
+  layout fidelity. Would need a second independent layout engine.
