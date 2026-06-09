@@ -37,6 +37,11 @@ def extract(
     # accent aggregation, per-role appearance colors, link colors). Additive and
     # deterministic; a template with no observed color leaves an empty palette.
     typography.capture_palette(doc, role_registry, theme)
+    # Capture the template's dominant paragraph GEOMETRY (spacing/indent/borders/
+    # shading from the runs' own w:pPr) into role.appearance.geometry + theme.geometry.
+    # DOCX-ONLY (Cluster D1): WordprocessingML pPr has no pptx/xlsx peer. Additive and
+    # deterministic - a template with no dominant geometry leaves it absent (no-op).
+    typography.capture_geometry(doc, role_registry, theme)
     cover_anchors, anchors = cover.discover_cover(doc)
     demo_region = structure.detect_demo_region(doc)
     toc_present = structure.is_toc_present(doc)

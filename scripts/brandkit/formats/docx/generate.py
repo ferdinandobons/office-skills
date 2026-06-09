@@ -1349,6 +1349,191 @@ def _all_para_runs(target_obj) -> list:
     return runs
 
 
+# ---------------------------------------------------------------------------
+# Paragraph GEOMETRY apply (Cluster D1, DOCX-ONLY).
+# ---------------------------------------------------------------------------
+# Geometry rides on ``w:pPr`` (the PARAGRAPH), so it is applied set-only-when-unset per
+# PROPERTY: each spacing/indent attribute is written only when ``w:pPr`` does not
+# already carry it directly, borders only when the side is absent, shading only when no
+# ``w:shd@w:fill`` is set. The captured border element is re-parsed and DEEP-COPIED
+# verbatim (never hand-built), so apply re-emits the exact structure capture recorded.
+# A profile with no captured geometry never reaches ``set_geometry`` (the op carries no
+# ``appearance.geometry``), so the no-geometry path is byte-identical.
+_GEOMETRY_BORDER_SIDES: tuple[str, ...] = ("top", "bottom", "left", "right")
+
+# The WordprocessingML ``CT_PPr`` child sequence (spec-fixed order). A geometry element
+# must be inserted BEFORE the first existing child that follows it in this order, or
+# Word rejects the document. python-docx wires this order for ``w:spacing`` / ``w:ind``
+# (``get_or_add_spacing`` / ``get_or_add_ind``) but NOT for ``w:pBdr`` / ``w:shd``, so
+# those two are inserted via :func:`_insert_ppr_child_ordered`.
+_PPR_CHILD_ORDER: tuple[str, ...] = (
+    "w:pStyle",
+    "w:keepNext",
+    "w:keepLines",
+    "w:pageBreakBefore",
+    "w:framePr",
+    "w:widowControl",
+    "w:numPr",
+    "w:suppressLineNumbers",
+    "w:pBdr",
+    "w:shd",
+    "w:tabs",
+    "w:suppressAutoHyphens",
+    "w:kinsoku",
+    "w:wordWrap",
+    "w:overflowPunct",
+    "w:topLinePunct",
+    "w:autoSpaceDE",
+    "w:autoSpaceDN",
+    "w:bidi",
+    "w:adjustRightInd",
+    "w:snapToGrid",
+    "w:spacing",
+    "w:ind",
+    "w:contextualSpacing",
+    "w:mirrorIndents",
+    "w:suppressOverlap",
+    "w:jc",
+    "w:textDirection",
+    "w:textAlignment",
+    "w:textboxTightWrap",
+    "w:outlineLvl",
+    "w:divId",
+    "w:cnfStyle",
+    "w:rPr",
+    "w:sectPr",
+    "w:pPrChange",
+)
+
+
+def _insert_ppr_child_ordered(ppr, tag: str):
+    """Get-or-create ``ppr/<tag>`` at the SPEC-CORRECT position in the ``CT_PPr`` child
+    sequence (so Word accepts the document). Returns the existing element when present,
+    else a new one inserted before the first existing successor in
+    :data:`_PPR_CHILD_ORDER` (appended only when no successor exists)."""
+    existing = ppr.find(qn(tag))
+    if existing is not None:
+        return existing
+    el = OxmlElement(tag)
+    successors = _PPR_CHILD_ORDER[_PPR_CHILD_ORDER.index(tag) + 1 :]
+    for child in ppr:
+        for succ in successors:
+            if child.tag == qn(succ):
+                child.addprevious(el)
+                return el
+    ppr.append(el)
+    return el
+
+
+def _set_twips_if_unset(el, attr: str, value) -> None:
+    """Set ``el@w:<attr>`` to ``value`` ONLY when the attribute is currently absent.
+
+    The set-only-when-unset guard at the single-attribute level, so an authored
+    spacing/indent attribute is never clobbered. A non-int ``value`` is skipped (the
+    captured value is always an int twips; this is a defensive guard)."""
+    if value is None or el.get(qn(f"w:{attr}")) is not None:
+        return
+    try:
+        el.set(qn(f"w:{attr}"), str(int(value)))
+    except (TypeError, ValueError):
+        return
+
+
+def _apply_spacing(ppr, spacing: dict) -> None:
+    """Apply the captured ``spacing`` sub-dict to ``w:pPr/w:spacing``, per-attribute
+    set-only-when-unset. The ``w:spacing`` element is created (in spec order, via
+    python-docx's ordered ``get_or_add_spacing``) if absent."""
+    if not spacing:
+        return
+    el = ppr.get_or_add_spacing()
+    _set_twips_if_unset(el, "before", spacing.get("before_twips"))
+    _set_twips_if_unset(el, "after", spacing.get("after_twips"))
+    _set_twips_if_unset(el, "line", spacing.get("line_twips"))
+    line_rule = spacing.get("line_rule")
+    if line_rule is not None and el.get(qn("w:lineRule")) is None:
+        el.set(qn("w:lineRule"), str(line_rule))
+
+
+def _apply_indent(ppr, indentation: dict) -> None:
+    """Apply the captured ``indentation`` sub-dict to ``w:pPr/w:ind``, per-attribute
+    set-only-when-unset. The ``w:ind`` element is created (in spec order, via
+    python-docx's ordered ``get_or_add_ind``) if absent."""
+    if not indentation:
+        return
+    el = ppr.get_or_add_ind()
+    _set_twips_if_unset(el, "left", indentation.get("left_twips"))
+    _set_twips_if_unset(el, "right", indentation.get("right_twips"))
+    _set_twips_if_unset(el, "firstLine", indentation.get("first_line_twips"))
+    _set_twips_if_unset(el, "hanging", indentation.get("hanging_twips"))
+
+
+def _apply_borders(ppr, borders: dict) -> None:
+    """Apply the captured ``borders`` sub-dict to ``w:pPr/w:pBdr``, per-SIDE
+    set-only-when-unset. ``w:pBdr`` is created at its spec position; each side element
+    is RE-PARSED from its serialized copy and appended verbatim (the exact structure
+    capture recorded), only when the side is absent. A malformed serialized side is
+    skipped (never crashes the write)."""
+    if not borders:
+        return
+    pbdr = _insert_ppr_child_ordered(ppr, "w:pBdr")
+    for side in _GEOMETRY_BORDER_SIDES:
+        serialized = borders.get(side)
+        if not serialized or pbdr.find(qn(f"w:{side}")) is not None:
+            continue
+        try:
+            el = parse_xml(serialized)
+        except Exception:
+            continue
+        pbdr.append(el)
+
+
+def _apply_shading(ppr, shading: dict) -> None:
+    """Apply the captured ``shading.fill_hex`` to ``w:pPr/w:shd@w:fill``, set-only-when-
+    unset (the whole ``w:shd`` is left untouched if it already carries an explicit
+    fill). The ``w:shd`` is created at its spec position; a clear shading is written
+    with the spec-required ``w:val='clear'``."""
+    fill = (shading or {}).get("fill_hex")
+    if not fill:
+        return
+    shd = ppr.find(qn("w:shd"))
+    if shd is not None and shd.get(qn("w:fill")) is not None:
+        return
+    try:
+        normalized = colorutil.normalize_hex(fill)
+    except (ValueError, AttributeError):
+        return
+    if shd is None:
+        shd = _insert_ppr_child_ordered(ppr, "w:shd")
+    if shd.get(qn("w:val")) is None:
+        shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:fill"), normalized)
+
+
+def _apply_paragraph_geometry(para, geometry: dict) -> None:
+    """Apply the captured ``geometry`` dict to ``para``'s ``w:pPr``, set-only-when-unset
+    per property (Cluster D1). The ``confidence`` sub-dict (capture provenance) is not
+    applied. A paragraph with no ``w:pPr`` gets one created lazily by the first axis
+    that has a captured value."""
+    if not geometry:
+        return
+    ppr = para._p.get_or_add_pPr()
+    _apply_spacing(ppr, geometry.get("spacing") or {})
+    _apply_indent(ppr, geometry.get("indentation") or {})
+    _apply_borders(ppr, geometry.get("borders") or {})
+    _apply_shading(ppr, geometry.get("shading") or {})
+
+
+def _paragraphs_of(target_obj) -> list:
+    """The paragraph(s) of ``target_obj`` that carry brand geometry.
+
+    A docx paragraph IS the geometry target (it exposes ``_p``); a table here exposes
+    no paragraph-geometry target, so it yields nothing (geometry is a paragraph axis).
+    Crash-safe: an object without a raw ``_p`` element yields nothing."""
+    if getattr(target_obj, "_p", None) is not None:
+        return [target_obj]
+    return []
+
+
 class _DocxAppearanceBackend:
     """The docx hook set the format-neutral ``common.appearance`` orchestration drives.
 
@@ -1359,7 +1544,12 @@ class _DocxAppearanceBackend:
     :func:`_set_run_color`) - so the shared control flow (probe, then write only when
     unset) produces byte-identical docx output, exactly the inlined v1 behavior. The
     docx-only raw-XML hyperlink injection (``_inject_hyperlink_run_color``) and the
-    WordprocessingML token map stay outside this backend."""
+    WordprocessingML token map stay outside this backend.
+
+    Cluster D1 adds the PARAGRAPH geometry hooks (``paragraphs_of`` + ``set_geometry``):
+    geometry rides on ``w:pPr`` (the paragraph, not the run), applied set-only-when-
+    unset per property. A profile with no captured geometry never reaches them (the op
+    carries no ``appearance.geometry``), so the no-geometry path is byte-identical."""
 
     def runs_of(self, target):
         return _all_para_runs(target)
@@ -1381,6 +1571,12 @@ class _DocxAppearanceBackend:
 
     def set_color(self, run, ref: dict, findings) -> None:
         _set_run_color(run, ref, findings)
+
+    def paragraphs_of(self, target):
+        return _paragraphs_of(target)
+
+    def set_geometry(self, para, geometry: dict) -> None:
+        _apply_paragraph_geometry(para, geometry)
 
 
 DOCX_BACKEND = _DocxAppearanceBackend()

@@ -43,6 +43,9 @@ from typing import Optional
 
 from docx.enum.dml import MSO_COLOR_TYPE, MSO_THEME_COLOR
 
+from lxml import etree
+
+from brandkit.common import color as colorutil
 from brandkit.common.typography import (
     PALETTE_WHERE,
 )
@@ -51,6 +54,9 @@ from brandkit.common.typography import (
 )
 from brandkit.common.typography import (
     capture_palette_facts as _capture_palette_facts,
+)
+from brandkit.common.typography import (
+    capture_paragraph_geometry as _capture_paragraph_geometry,
 )
 from brandkit.ooxml import names
 
@@ -66,6 +72,7 @@ from brandkit.ooxml import names
 __all__ = [
     "capture_fonts",
     "capture_palette",
+    "capture_geometry",
     "PALETTE_WHERE",
 ]
 
@@ -301,3 +308,187 @@ def _palette_run_facts(doc):
     for para in doc.paragraphs:
         for run in _iter_para_runs(para):
             yield _DocxRunFact(run, None, is_link=_is_link_run(run))
+
+
+# ---------------------------------------------------------------------------
+# Paragraph GEOMETRY capture (Cluster D1, DOCX-ONLY).
+# ---------------------------------------------------------------------------
+# These readers are the docx-specific peers of ``_run_size_hp`` / ``_run_color`` for
+# the geometry axis: they read EXPLICIT ``w:pPr`` properties off a paragraph and return
+# ``None`` for any property the paragraph inherits, so the shared
+# ``capture_paragraph_geometry`` engine sees an "inherit" vote it counts but never lets
+# win. Everything is read off the live ``w:pPr`` element (no python-docx high-level
+# wrapper) so the captured value is byte-faithful to the template. Borders/shading are
+# copied as serialized element/attribute facts - never hand-constructed - so apply can
+# re-emit the EXACT structure the template carried.
+_GEOMETRY_BORDER_SIDES: tuple[str, ...] = ("top", "bottom", "left", "right")
+
+
+def _ppr_of(para):
+    """The paragraph's ``w:pPr`` element, or ``None`` when it carries none.
+
+    Read crash-safe off the raw ``w:p`` (``para._p``); a paragraph with no direct
+    properties has no ``w:pPr`` child, so every geometry axis votes ``None`` (inherit).
+    """
+    try:
+        return para._p.find(_W("pPr"))
+    except Exception:
+        return None
+
+
+def _twips_attr(el, attr: str) -> Optional[int]:
+    """An integer twips attribute off ``el`` (e.g. ``w:spacing@w:before``), or ``None``.
+
+    A missing element/attribute or a non-integer value (a malformed template) votes
+    ``None`` (inherit) rather than crashing the extraction - capture is fail-soft."""
+    if el is None:
+        return None
+    val = el.get(_W(attr))
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _spacing_facts(
+    ppr,
+) -> tuple[Optional[int], Optional[int], Optional[int], Optional[str]]:
+    """``(before, after, line, line_rule)`` from ``w:pPr/w:spacing`` - each ``None``
+    when that single attribute is absent (the attributes are INDEPENDENT axes)."""
+    if ppr is None:
+        return (None, None, None, None)
+    spacing = ppr.find(_W("spacing"))
+    if spacing is None:
+        return (None, None, None, None)
+    before = _twips_attr(spacing, "before")
+    after = _twips_attr(spacing, "after")
+    line = _twips_attr(spacing, "line")
+    line_rule = spacing.get(_W("lineRule")) or None
+    return (before, after, line, line_rule)
+
+
+def _indent_facts(
+    ppr,
+) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """``(left, right, first_line, hanging)`` twips from ``w:pPr/w:ind`` - each ``None``
+    when that single attribute is absent (INDEPENDENT axes)."""
+    if ppr is None:
+        return (None, None, None, None)
+    ind = ppr.find(_W("ind"))
+    if ind is None:
+        return (None, None, None, None)
+    return (
+        _twips_attr(ind, "left"),
+        _twips_attr(ind, "right"),
+        _twips_attr(ind, "firstLine"),
+        _twips_attr(ind, "hanging"),
+    )
+
+
+def _border_facts(ppr) -> dict[str, str]:
+    """``{side: <serialized w:top/.../w:right element>}`` for every ``w:pBdr`` side the
+    paragraph carries directly, as an OPAQUE byte-copy (canonical lxml serialization).
+
+    The element is copied VERBATIM (never hand-built), so the apply side re-emits the
+    exact structure the template used; a side the paragraph does not carry is absent
+    (it votes ``None`` on that side's dominance axis). Crash-safe: an unserializable
+    node contributes nothing."""
+    out: dict[str, str] = {}
+    if ppr is None:
+        return out
+    pbdr = ppr.find(_W("pBdr"))
+    if pbdr is None:
+        return out
+    for side in _GEOMETRY_BORDER_SIDES:
+        el = pbdr.find(_W(side))
+        if el is None:
+            continue
+        try:
+            out[side] = etree.tostring(el, encoding="unicode")
+        except Exception:
+            continue
+    return out
+
+
+def _shading_fill_hex(ppr) -> Optional[str]:
+    """The ``w:pPr/w:shd@w:fill`` shading hex, normalized, or ``None``.
+
+    ``auto`` / a missing fill / a malformed hex contributes nothing (it is not a
+    captured brand value, mirroring ``_run_color``'s drop of ``auto``)."""
+    if ppr is None:
+        return None
+    shd = ppr.find(_W("shd"))
+    if shd is None:
+        return None
+    fill = shd.get(_W("fill"))
+    if not fill or fill.lower() == "auto":
+        return None
+    try:
+        return colorutil.normalize_hex(fill)
+    except (ValueError, AttributeError):
+        return None
+
+
+class _DocxParaGeometryFact:
+    """A docx paragraph reduced to the structural
+    :class:`~brandkit.common.typography.ParaGeometryFacts` view the shared geometry
+    engine folds. Every axis is read EXPLICITLY off ``w:pPr`` (``None`` == inherit)."""
+
+    __slots__ = (
+        "style_key",
+        "spacing_before_twips",
+        "spacing_after_twips",
+        "spacing_line_twips",
+        "spacing_line_rule",
+        "indent_left_twips",
+        "indent_right_twips",
+        "indent_first_line_twips",
+        "indent_hanging_twips",
+        "borders",
+        "shading_fill_hex",
+    )
+
+    def __init__(self, para, style_key) -> None:
+        self.style_key = style_key
+        ppr = _ppr_of(para)
+        before, after, line, line_rule = _spacing_facts(ppr)
+        self.spacing_before_twips = before
+        self.spacing_after_twips = after
+        self.spacing_line_twips = line
+        self.spacing_line_rule = line_rule
+        left, right, first_line, hanging = _indent_facts(ppr)
+        self.indent_left_twips = left
+        self.indent_right_twips = right
+        self.indent_first_line_twips = first_line
+        self.indent_hanging_twips = hanging
+        self.borders = _border_facts(ppr)
+        self.shading_fill_hex = _shading_fill_hex(ppr)
+
+
+def _geometry_para_facts(doc):
+    """Yield a :class:`_DocxParaGeometryFact` per paragraph in document order, tagged
+    with the paragraph's style key (the per-role fold key). A single ordered generator
+    keeps the dominance ``Counter`` insertion order deterministic."""
+    for para in doc.paragraphs:
+        yield _DocxParaGeometryFact(para, _para_style_key(para))
+
+
+def capture_geometry(doc, roles: dict, theme: dict) -> None:
+    """Capture dominant paragraph GEOMETRY (spacing, indentation, paragraph borders,
+    shading) into ``roles`` (per role ``appearance.geometry``) and the document default
+    (``theme['geometry']['body']``), mutating both in place. DOCX-ONLY (Cluster D1).
+
+    Reads only the EXPLICIT ``w:pPr`` value per property; a paragraph that inherits a
+    property contributes nothing to THAT axis (every property is sampled
+    independently). This builds a docx ``ParaGeometryFacts`` generator over the
+    document's paragraphs and delegates to the format-neutral
+    :func:`~brandkit.common.typography.capture_paragraph_geometry`; the default
+    ``role_style_key`` reproduces the docx ``named_style`` OR-match used by
+    :func:`capture_fonts`. Additive and deterministic: a template with no dominant
+    direct geometry leaves ``geometry`` absent, so docx output stays byte-identical.
+
+    NOT wired into pptx/xlsx: paragraph geometry is WordprocessingML ``w:pPr`` only.
+    """
+    _capture_paragraph_geometry(_geometry_para_facts(doc), roles, theme)

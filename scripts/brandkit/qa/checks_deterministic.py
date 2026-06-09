@@ -672,6 +672,311 @@ def check_appearance_targets(shell, profile: dict) -> list[Finding]:
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Paragraph GEOMETRY check (Cluster D1, DOCX-ONLY).
+# ---------------------------------------------------------------------------
+# Geometry is captured NUMBERS (twips) and XML ELEMENTS (borders / shading), NOT
+# symbolic refs into a shell inventory like a font name or a style id. So this check is
+# NOT a membership-against-a-named-inventory like ``check_appearance_targets`` - it is
+# the HONEST geometry analogue:
+#   (1) SHAPE / SANITY: every captured value is well-formed - twips are integers in the
+#       OOXML range, line_rule/border serialization are structurally valid, a shading
+#       fill is a real ``RRGGBB`` hex;
+#   (2) OBSERVED-FLOOR MEMBERSHIP: every applied geometry value is one the TEMPLATE'S
+#       OWN paragraphs carried (byte-identical match against the shell's observed
+#       ``w:pPr`` facts) - the captured floor is the template's own geometry, never a
+#       synthesized value.
+# Fail-closed: a malformed / out-of-range / un-observed (synthesized) value is ERROR;
+# only the template's own observed geometry passes. No-op for any non-docx kind, an
+# absent shell, or a profile with no captured geometry.
+
+# OOXML ``w:spacing@w:before/@w:after/@w:line`` are ``ST_TwipsMeasure`` (unsigned);
+# ``w:ind`` left/right are ``ST_SignedTwipsMeasure`` (may be negative); firstLine /
+# hanging are ``ST_TwipsMeasure`` (unsigned). The page-dimension ceiling is 31680
+# twips (22"); we use a generous symmetric sanity bound so a structurally-impossible
+# value (a synthesized 999999) is rejected on SHAPE before the observed-floor check
+# even runs. This is a structural floor, NOT a brand bound - the real gate is the
+# observed-floor membership below.
+_GEOMETRY_TWIPS_MIN = -31680
+_GEOMETRY_TWIPS_MAX = 31680
+
+# The geometry scalar (group, field) -> whether the field is a twips measure (vs the
+# ``line_rule`` string). Mirrors common.typography._GEOMETRY_SCALAR_FIELDS.
+_GEOMETRY_TWIPS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("spacing", "before_twips"),
+    ("spacing", "after_twips"),
+    ("spacing", "line_twips"),
+    ("indentation", "left_twips"),
+    ("indentation", "right_twips"),
+    ("indentation", "first_line_twips"),
+    ("indentation", "hanging_twips"),
+)
+_GEOMETRY_BORDER_SIDES: tuple[str, ...] = ("top", "bottom", "left", "right")
+# The spec-fixed WordprocessingML line-rule tokens (closed vocabulary).
+_GEOMETRY_LINE_RULES: frozenset[str] = frozenset({"auto", "exact", "atLeast"})
+
+
+class ShellGeometryFacts(NamedTuple):
+    """The paragraph-geometry facts a docx shell proves it carries on its OWN
+    paragraphs, the OBSERVED FLOOR an applied geometry value is validated against:
+
+      - ``twips``: ``{(group, field): set[int]}`` - every explicit twips value the
+        shell's own ``w:pPr`` carry, per scalar field;
+      - ``line_rules``: the set of ``w:spacing@w:lineRule`` tokens observed;
+      - ``borders``: ``{side: set[str]}`` of serialized ``w:pBdr`` side elements
+        observed (byte-identical copies);
+      - ``shading``: the set of observed normalized ``w:shd@w:fill`` hexes.
+    """
+
+    twips: dict
+    line_rules: set
+    borders: dict
+    shading: set
+
+
+def _docx_collect_geometry_facts(shell) -> ShellGeometryFacts:
+    """Read the docx shell's OWN paragraph geometry (every ``w:pPr`` in
+    ``word/document.xml``) into the observed floor. A missing/garbage document part
+    yields empty sets - the caller then fails closed on any applied geometry."""
+    from lxml import etree as _etree
+
+    twips: dict = {field: set() for field in _GEOMETRY_TWIPS_FIELDS}
+    line_rules: set = set()
+    borders: dict = {side: set() for side in _GEOMETRY_BORDER_SIDES}
+    shading: set = set()
+    try:
+        xml = pack.read_part(shell, "word/document.xml")
+    except KeyError:
+        return ShellGeometryFacts(
+            twips=twips, line_rules=line_rules, borders=borders, shading=shading
+        )
+    root = pack.parse_xml_bytes(xml)
+
+    def _twips(el, attr):
+        val = el.get(_W(attr))
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    for ppr in root.iter(_W("pPr")):
+        spacing = ppr.find(_W("spacing"))
+        if spacing is not None:
+            for field, attr in (
+                (("spacing", "before_twips"), "before"),
+                (("spacing", "after_twips"), "after"),
+                (("spacing", "line_twips"), "line"),
+            ):
+                v = _twips(spacing, attr)
+                if v is not None:
+                    twips[field].add(v)
+            rule = spacing.get(_W("lineRule"))
+            if rule:
+                line_rules.add(rule)
+        ind = ppr.find(_W("ind"))
+        if ind is not None:
+            for field, attr in (
+                (("indentation", "left_twips"), "left"),
+                (("indentation", "right_twips"), "right"),
+                (("indentation", "first_line_twips"), "firstLine"),
+                (("indentation", "hanging_twips"), "hanging"),
+            ):
+                v = _twips(ind, attr)
+                if v is not None:
+                    twips[field].add(v)
+        pbdr = ppr.find(_W("pBdr"))
+        if pbdr is not None:
+            for side in _GEOMETRY_BORDER_SIDES:
+                el = pbdr.find(_W(side))
+                if el is not None:
+                    try:
+                        borders[side].add(_etree.tostring(el, encoding="unicode"))
+                    except Exception:
+                        continue
+        shd = ppr.find(_W("shd"))
+        if shd is not None:
+            fill = shd.get(_W("fill"))
+            if fill and fill.lower() != "auto":
+                try:
+                    shading.add(colorutil.normalize_hex(fill))
+                except (ValueError, AttributeError):
+                    continue
+    return ShellGeometryFacts(
+        twips=twips, line_rules=line_rules, borders=borders, shading=shading
+    )
+
+
+def _collect_applied_geometry(profile: dict) -> list:
+    """Gather every ``(where, geometry-dict)`` the engine will APPLY: each role's
+    ``appearance.geometry`` and the document body geometry (``theme.geometry.body``).
+    Sorted by ``where`` for a deterministic finding order."""
+    applied: list = []
+    for rid, entry in (profile.get("roles") or {}).items():
+        if rid == "_index" or not isinstance(entry, dict):
+            continue
+        geometry = (entry.get("appearance") or {}).get("geometry")
+        if isinstance(geometry, dict) and geometry:
+            applied.append((f"role {rid!r}", geometry))
+    body = ((profile.get("theme") or {}).get("geometry") or {}).get("body")
+    if isinstance(body, dict) and body:
+        applied.append(("theme.geometry.body", body))
+    applied.sort(key=lambda item: item[0])
+    return applied
+
+
+def _geometry_border_is_valid(serialized) -> bool:
+    """A captured border side is well-formed: a serialized ``w:top/.../w:right`` element
+    whose required ``w:val`` (the border style) is present. A non-string, unparseable,
+    or attribute-missing copy is rejected (fail-closed on a synthesized border)."""
+    if not isinstance(serialized, str) or not serialized:
+        return False
+    try:
+        el = pack.parse_xml_bytes(serialized.encode("utf-8"))
+    except Exception:
+        return False
+    # A WordprocessingML border element requires ``w:val`` (the border line style).
+    return el.get(_W("val")) is not None
+
+
+def check_geometry_targets(shell, profile: dict) -> list[Finding]:
+    """Verify every paragraph-geometry value the engine will APPLY is (1) WELL-FORMED
+    and (2) a value the TEMPLATE'S OWN paragraphs carried (the captured floor) - the
+    honest fail-closed peer of :func:`check_appearance_targets` for the geometry axis
+    (Cluster D1, DOCX-ONLY).
+
+    Geometry is captured NUMBERS and XML ELEMENTS, not symbolic refs into a shell
+    inventory, so this is NOT a name-membership check. It proves instead:
+
+      - SHAPE / SANITY: spacing/indent twips are integers in the OOXML range; a
+        ``line_rule`` is a spec token; a border side is a structurally valid element
+        carrying its required ``w:val``; a shading fill is a real ``RRGGBB`` hex.
+      - OBSERVED FLOOR: every applied twips/border/shading value is byte-identical to a
+        value the shell's own ``w:pPr`` carried (parsed by
+        :func:`_docx_collect_geometry_facts`), so a captured value is only ever the
+        template's own observed geometry - NEVER a synthesized value.
+
+    Fail-closed: a malformed / out-of-range / un-observed value is ERROR. A no-op when
+    the kind is not docx, the shell is absent, or no geometry is captured (every
+    pre-D1 profile). A shell that cannot be parsed fails CLOSED (a WARNING plus empty
+    observed sets, so every applied value is then rejected)."""
+    if shell is None or profile.get("kind") != schema.Kind.DOCX.value:
+        return []
+    applied = _collect_applied_geometry(profile)
+    if not applied:
+        return []
+    findings: list[Finding] = []
+    try:
+        facts = _docx_collect_geometry_facts(shell)
+    except Exception as exc:  # opening the shell must never crash the gate
+        findings.append(
+            Finding(
+                "appearance_geometry_targets",
+                schema.Severity.WARNING.value,
+                f"could not verify geometry targets against shell: {exc}",
+            )
+        )
+        facts = ShellGeometryFacts(
+            twips={field: set() for field in _GEOMETRY_TWIPS_FIELDS},
+            line_rules=set(),
+            borders={side: set() for side in _GEOMETRY_BORDER_SIDES},
+            shading=set(),
+        )
+
+    def _err(where: str, msg: str) -> None:
+        findings.append(
+            Finding(
+                "appearance_geometry_targets",
+                schema.Severity.ERROR.value,
+                msg,
+                location=where,
+            )
+        )
+
+    for where, geometry in applied:
+        spacing = geometry.get("spacing") or {}
+        indentation = geometry.get("indentation") or {}
+        # (1) scalar twips: shape (int + in range) then observed-floor membership.
+        for group, field in _GEOMETRY_TWIPS_FIELDS:
+            sub = spacing if group == "spacing" else indentation
+            if field not in sub:
+                continue
+            value = sub[field]
+            if not isinstance(value, int) or isinstance(value, bool):
+                _err(
+                    where,
+                    f"{where} geometry {group}.{field} {value!r} is not an integer twips value",
+                )
+                continue
+            if not (_GEOMETRY_TWIPS_MIN <= value <= _GEOMETRY_TWIPS_MAX):
+                _err(
+                    where,
+                    f"{where} geometry {group}.{field} {value} twips is out of the sane "
+                    f"OOXML range [{_GEOMETRY_TWIPS_MIN}, {_GEOMETRY_TWIPS_MAX}]",
+                )
+                continue
+            observed = facts.twips.get((group, field), set())
+            if value not in observed:
+                _err(
+                    where,
+                    f"{where} geometry {group}.{field} {value} twips is not observed on any "
+                    f"paragraph in the shell (have {sorted(observed)})",
+                )
+        # line_rule: a spec token observed on the shell.
+        line_rule = spacing.get("line_rule")
+        if line_rule is not None:
+            if line_rule not in _GEOMETRY_LINE_RULES:
+                _err(
+                    where,
+                    f"{where} geometry spacing.line_rule {line_rule!r} is not a WordprocessingML line rule",
+                )
+            elif line_rule not in facts.line_rules:
+                _err(
+                    where,
+                    f"{where} geometry spacing.line_rule {line_rule!r} is not observed in the shell "
+                    f"(have {sorted(facts.line_rules)})",
+                )
+        # (2) borders: each side well-formed AND byte-identical to an observed side.
+        borders = geometry.get("borders") or {}
+        for side, serialized in borders.items():
+            if side not in _GEOMETRY_BORDER_SIDES:
+                _err(where, f"{where} geometry borders has unknown side {side!r}")
+                continue
+            if not _geometry_border_is_valid(serialized):
+                _err(
+                    where,
+                    f"{where} geometry borders.{side} is not a valid WordprocessingML border element",
+                )
+                continue
+            if serialized not in facts.borders.get(side, set()):
+                _err(
+                    where,
+                    f"{where} geometry borders.{side} is not byte-identical to any border the shell "
+                    "carries (synthesized geometry rejected)",
+                )
+        # (3) shading: a real hex AND observed on the shell.
+        shading = geometry.get("shading") or {}
+        fill = shading.get("fill_hex")
+        if fill is not None:
+            try:
+                normalized = colorutil.normalize_hex(fill)
+            except (ValueError, AttributeError):
+                normalized = None
+            if normalized is None:
+                _err(
+                    where,
+                    f"{where} geometry shading.fill_hex {fill!r} is not a valid #RRGGBB hex",
+                )
+            elif normalized not in facts.shading:
+                _err(
+                    where,
+                    f"{where} geometry shading.fill_hex #{normalized} is not observed on any paragraph "
+                    f"in the shell (have {sorted(facts.shading)})",
+                )
+    return findings
+
+
 def _pptx_layout_names(shell) -> set:
     prs = Presentation(shell)
     return {layout.name for layout in prs.slide_layouts}

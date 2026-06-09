@@ -6,6 +6,31 @@ All notable changes to BrandDocs are documented in this file.
 
 ### Added
 
+- **Paragraph geometry is now a captured brand axis (DOCX only, Cluster D1).** The
+  proven dominant-capture + appearance-seam + fail-closed-check pattern that ships for
+  font family/size/color now also covers paragraph GEOMETRY: spacing (before/after/
+  line + line rule), indentation (left/right/first-line/hanging), paragraph borders
+  (`w:pBdr`), and shading (`w:shd`), all read from the template's own `w:pPr`.
+  - **Capture** is a dominance statistic, identical floor to the typographic axes
+    (`MIN_RUNS` + `MIN_DOMINANCE`): every geometry property is an INDEPENDENT axis, and
+    a value is recorded for a role only when it dominates that role's own paragraphs
+    (the document body geometry when it dominates all of them). Nothing is hardcoded to
+    any template's twips. Stored additively under `role.appearance.geometry` and
+    `theme.geometry.body`; borders are byte-copied as serialized elements.
+  - **Apply** flows through the single resolver/appearance seam (`op.appearance.geometry`)
+    and writes each property set-only-when-unset, so an authored/inherited value is
+    never clobbered and a no-geometry profile generates byte-identically (the frozen
+    anchor stays green). Geometry has NO family gate (unlike body size/color): a
+    heading's own captured indentation/spacing is intentional branding and applies.
+  - **Verify** adds `check_geometry_targets` (gate-wired), the honest fail-closed peer
+    for an intrinsic-measurement axis: it does NOT do name-membership against a shell
+    inventory (geometry is captured numbers/elements, not symbolic refs). It proves
+    every applied value is WELL-FORMED (twips in the OOXML range, valid border element,
+    real `RRGGBB` shading) AND byte-identical to a value the template's OWN paragraphs
+    carried (the captured floor) - a synthesized or out-of-range value is an ERROR.
+  - **Still DOCX-only:** pptx/xlsx never capture or apply geometry (WordprocessingML
+    `w:pPr` has no shape-geometry peer in scope here); their output is untouched.
+    Schema stays 1.2.0 (additive).
 - **Cross-format appearance vertical (pptx + xlsx now capture, apply, and verify
   brand typography/color).** The role typography (font/size/color) and model-driven
   run color that shipped for docx in 0.7.0 now work on PowerPoint and Excel too. The

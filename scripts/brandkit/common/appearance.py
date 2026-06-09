@@ -82,6 +82,26 @@ class AppearanceBackend(Protocol):
         with an INFO finding rather than raising."""
         ...
 
+    def paragraphs_of(self, target) -> Iterable:
+        """Every PARAGRAPH of ``target`` that may carry brand geometry (Cluster D1).
+
+        Geometry (``w:pPr``) lives on the PARAGRAPH, not the run, so this is a separate
+        iterator from :meth:`runs_of`. A backend with no paragraph-geometry support
+        (pptx/xlsx today) yields nothing, so :func:`apply_role_appearance` no-ops the
+        geometry pass for it (the axis is docx-only by construction)."""
+        ...
+
+    def set_geometry(self, para, geometry: dict) -> None:
+        """Apply the captured ``geometry`` dict to ``para``'s ``w:pPr``, SET-ONLY-WHEN-
+        UNSET per property (Cluster D1, docx-only).
+
+        Each property (spacing before/after/line, the four indents, the four border
+        sides, shading fill) is written ONLY when the paragraph does not already carry
+        it directly, so an authored/inherited value is never clobbered and re-runs stay
+        byte-identical. A backend without geometry support never has this called
+        (:meth:`paragraphs_of` yields nothing)."""
+        ...
+
 
 def op_latin(op) -> Optional[str]:
     """The captured brand latin font this resolved op applies, or ``None``.
@@ -111,6 +131,17 @@ def op_color(op) -> Optional[dict]:
     body/paragraph family via the resolver's family gate, so a heading's intrinsic
     style color is never overridden here."""
     return (getattr(op, "appearance", None) or {}).get("color")
+
+
+def op_geometry(op) -> Optional[dict]:
+    """The captured brand paragraph GEOMETRY this resolved op applies (Cluster D1,
+    docx-only), or ``None``.
+
+    Read STRICTLY from ``op.appearance.geometry`` (resolver-populated from the profile,
+    role-specific geometry winning over the body geometry; NO family gate). ``None``
+    for every profile that carries no captured geometry, so the no-geometry path is a
+    byte-identical no-op."""
+    return (getattr(op, "appearance", None) or {}).get("geometry")
 
 
 def resolve_run_color(
@@ -157,15 +188,24 @@ def apply_role_appearance(
     latin = op_latin(op)
     size_hp = op_size_hp(op)
     color = op_color(op)
-    if not (latin or size_hp or color):
+    geometry = op_geometry(op)
+    if not (latin or size_hp or color or geometry):
         return
-    for run in backend.runs_of(target):
-        if latin and backend.font_unset(run):
-            backend.set_font(run, latin)
-        if size_hp and backend.size_unset(run):
-            backend.set_size(run, size_hp)
-        if color and backend.color_unset(run):
-            backend.set_color(run, color, findings)
+    if latin or size_hp or color:
+        for run in backend.runs_of(target):
+            if latin and backend.font_unset(run):
+                backend.set_font(run, latin)
+            if size_hp and backend.size_unset(run):
+                backend.set_size(run, size_hp)
+            if color and backend.color_unset(run):
+                backend.set_color(run, color, findings)
+    # GEOMETRY (Cluster D1, docx-only) is a PARAGRAPH axis, applied separately from the
+    # run axes. A backend without geometry support (pptx/xlsx) exposes no
+    # ``paragraphs_of`` and is skipped, so the axis is docx-only by construction. Each
+    # property is written set-only-when-unset by the backend's ``set_geometry``.
+    if geometry and hasattr(backend, "paragraphs_of"):
+        for para in backend.paragraphs_of(target):
+            backend.set_geometry(para, geometry)
 
 
 def apply_run_color(

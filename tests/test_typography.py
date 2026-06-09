@@ -2028,5 +2028,587 @@ class SlotTokenAndCompositionTest(unittest.TestCase):
             )  # no theme.colors hex -> themeColor only
 
 
+# ===========================================================================
+# Cluster D1: paragraph GEOMETRY (spacing / indent / borders / shading), DOCX-ONLY.
+# A NEW appearance axis under the SAME _dominant floor: capture, resolver merge (no
+# family gate), apply (set-only-when-unset), byte-identity (no-geometry path), the
+# honest fail-closed check (well-formed + observed-floor), and a docx end-to-end.
+# ===========================================================================
+def _set_spacing(para, *, before=None, after=None, line=None, line_rule=None):
+    """Set explicit ``w:pPr/w:spacing`` attributes on a python-docx paragraph."""
+    ppr = para._p.get_or_add_pPr()
+    sp = ppr.find(qn("w:spacing"))
+    if sp is None:
+        sp = OxmlElement("w:spacing")
+        ppr.append(sp)
+    if before is not None:
+        sp.set(qn("w:before"), str(before))
+    if after is not None:
+        sp.set(qn("w:after"), str(after))
+    if line is not None:
+        sp.set(qn("w:line"), str(line))
+    if line_rule is not None:
+        sp.set(qn("w:lineRule"), line_rule)
+
+
+def _set_indent(para, *, left=None, right=None, first_line=None, hanging=None):
+    """Set explicit ``w:pPr/w:ind`` attributes on a python-docx paragraph."""
+    ppr = para._p.get_or_add_pPr()
+    ind = ppr.find(qn("w:ind"))
+    if ind is None:
+        ind = OxmlElement("w:ind")
+        ppr.append(ind)
+    if left is not None:
+        ind.set(qn("w:left"), str(left))
+    if right is not None:
+        ind.set(qn("w:right"), str(right))
+    if first_line is not None:
+        ind.set(qn("w:firstLine"), str(first_line))
+    if hanging is not None:
+        ind.set(qn("w:hanging"), str(hanging))
+
+
+def _set_top_border(para, *, val="single", sz="4", space="1", color="auto"):
+    """Set an explicit ``w:pPr/w:pBdr/w:top`` border element on a paragraph."""
+    ppr = para._p.get_or_add_pPr()
+    pbdr = ppr.find(qn("w:pBdr"))
+    if pbdr is None:
+        pbdr = OxmlElement("w:pBdr")
+        ppr.append(pbdr)
+    top = OxmlElement("w:top")
+    top.set(qn("w:val"), val)
+    top.set(qn("w:sz"), sz)
+    top.set(qn("w:space"), space)
+    top.set(qn("w:color"), color)
+    pbdr.append(top)
+
+
+def _set_shading(para, fill):
+    """Set an explicit ``w:pPr/w:shd@w:fill`` on a paragraph."""
+    ppr = para._p.get_or_add_pPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:fill"), fill)
+    ppr.append(shd)
+
+
+def _heading_role(appearance=None):
+    entry = {
+        "resolver": {
+            "type": "named_style",
+            "style_id": "Heading1",
+            "style_name": "Heading 1",
+        }
+    }
+    if appearance is not None:
+        entry["appearance"] = appearance
+    return {"_index": ["heading.1"], "heading.1": entry}
+
+
+def _out_ppr_xml(out):
+    """Every ``w:pPr`` of the generated doc as serialized strings (for raw assertions)."""
+    from lxml import etree
+
+    doc = Document(out)
+    return [
+        etree.tostring(p._p.find(qn("w:pPr")), encoding="unicode")
+        for p in doc.paragraphs
+        if p._p.find(qn("w:pPr")) is not None
+    ]
+
+
+# ---------------------------------------------------------------------------
+# capture: dominant geometry floor, independent fields, absent when no dominance
+# ---------------------------------------------------------------------------
+class CaptureGeometryTest(unittest.TestCase):
+    def test_dominant_spacing_before_captured_into_role(self):
+        doc = Document()
+        for _ in range(5):
+            _set_spacing(doc.add_paragraph(style="Heading 1"), before=240)
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        geom = roles["heading.1"]["appearance"]["geometry"]
+        self.assertEqual(geom["spacing"]["before_twips"], 240)
+        self.assertGreaterEqual(geom["confidence"]["spacing.before_twips"], 0.6)
+
+    def test_dominant_body_geometry_captured_into_theme(self):
+        doc = Document()
+        for _ in range(6):
+            _set_indent(doc.add_paragraph(), left=720)
+        roles = {"_index": []}
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        self.assertEqual(theme["geometry"]["body"]["indentation"]["left_twips"], 720)
+
+    def test_independent_geometry_fields(self):
+        # A role captures indent but NOT spacing: only the indent axis is recorded.
+        doc = Document()
+        for _ in range(4):
+            _set_indent(doc.add_paragraph(style="Heading 1"), left=360)
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        geom = roles["heading.1"]["appearance"]["geometry"]
+        self.assertEqual(geom["indentation"]["left_twips"], 360)
+        self.assertNotIn("spacing", geom)
+
+    def test_below_dominance_geometry_floor_captures_nothing(self):
+        # Only 2 paragraphs carry spacing (< MIN_RUNS=3): nothing is captured.
+        doc = Document()
+        for _ in range(2):
+            _set_spacing(doc.add_paragraph(style="Heading 1"), before=240)
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        self.assertNotIn("geometry", roles["heading.1"].get("appearance", {}))
+
+    def test_no_explicit_geometry_captures_nothing(self):
+        doc = Document()
+        for _ in range(5):
+            doc.add_paragraph("inherits geometry")  # no explicit w:pPr geometry
+        roles = {"_index": []}
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        self.assertNotIn("geometry", theme)
+
+    def test_minority_geometry_value_is_not_captured(self):
+        # 5 paragraphs: 2 with 240, 3 inherit. 240 is 2/5 = 40% < 60% -> not captured.
+        doc = Document()
+        for _ in range(2):
+            _set_spacing(doc.add_paragraph(), before=240)
+        for _ in range(3):
+            doc.add_paragraph("inherit")
+        roles = {"_index": []}
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        self.assertNotIn("geometry", theme)
+
+    def test_border_capture_as_serialized_element(self):
+        doc = Document()
+        for _ in range(4):
+            _set_top_border(doc.add_paragraph(style="Heading 1"))
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        borders = roles["heading.1"]["appearance"]["geometry"]["borders"]
+        self.assertIn("top", borders)
+        self.assertIn("w:top", borders["top"])
+        self.assertIn('w:val="single"', borders["top"])
+
+    def test_shading_capture_normalizes_hex(self):
+        doc = Document()
+        for _ in range(4):
+            _set_shading(doc.add_paragraph(style="Heading 1"), "ffEE00")
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        self.assertEqual(
+            roles["heading.1"]["appearance"]["geometry"]["shading"]["fill_hex"],
+            "FFEE00",
+        )
+
+    def test_geometry_capture_is_idempotent_on_rerun(self):
+        doc = Document()
+        for _ in range(5):
+            _set_spacing(doc.add_paragraph(style="Heading 1"), before=240, after=120)
+        roles = _heading_role(appearance={})
+        theme = {"colors": {}, "fonts": {}}
+        typography.capture_geometry(doc, roles, theme)
+        first = dict(roles["heading.1"]["appearance"]["geometry"])
+        typography.capture_geometry(doc, roles, theme)
+        self.assertEqual(roles["heading.1"]["appearance"]["geometry"], first)
+
+
+# ---------------------------------------------------------------------------
+# resolver: role-specific geometry wins; body geometry fills in for EVERY role
+# (NO family gate, unlike size/color)
+# ---------------------------------------------------------------------------
+class ResolverGeometryTest(unittest.TestCase):
+    def _prof(self, *, body=None, heading_geom=None):
+        theme = {"colors": {}, "fonts": {}}
+        if body is not None:
+            theme["geometry"] = {"body": body}
+        appearance = {"geometry": heading_geom} if heading_geom is not None else {}
+        return {
+            "kind": "docx",
+            "theme": theme,
+            "roles": {
+                "_index": ["heading.1"],
+                "heading.1": {
+                    "resolver": {"type": "named_style", "style_id": "Heading1"},
+                    "appearance": appearance,
+                    "status": "robust",
+                    "confidence": 1.0,
+                },
+            },
+        }
+
+    def test_role_geometry_wins_over_body(self):
+        prof = self._prof(
+            body={"indentation": {"left_twips": 720}},
+            heading_geom={"indentation": {"left_twips": 360}},
+        )
+        op = ProfileResolver(prof).resolve_role("heading.1")
+        self.assertEqual(op.appearance["geometry"]["indentation"]["left_twips"], 360)
+
+    def test_body_geometry_flows_to_heading_no_family_gate(self):
+        # CRITICAL: geometry has NO family gate (unlike body size/color). A heading
+        # with no captured geometry DOES inherit the body geometry default.
+        prof = self._prof(body={"spacing": {"before_twips": 240}})
+        op = ProfileResolver(prof).resolve_role("heading.1")
+        self.assertEqual(op.appearance["geometry"]["spacing"]["before_twips"], 240)
+
+    def test_heading_with_no_geometry_and_no_body_stays_clean(self):
+        prof = self._prof()
+        op = ProfileResolver(prof).resolve_role("heading.1")
+        self.assertNotIn("geometry", op.appearance)
+
+    def test_pre_d1_profile_resolves_without_geometry(self):
+        prof = self._prof()
+        op = ProfileResolver(prof).resolve_role("paragraph", fallback="paragraph")
+        self.assertNotIn("geometry", op.appearance)
+
+
+# ---------------------------------------------------------------------------
+# apply: geometry written to w:pPr; set-only-when-unset; borders copied verbatim
+# ---------------------------------------------------------------------------
+class ApplyGeometryTest(unittest.TestCase):
+    def _prof_with_body_geometry(self, geometry):
+        return _profile(
+            theme={"colors": {}, "fonts": {}, "geometry": {"body": geometry}}
+        )
+
+    def test_spacing_applied_when_unset(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = self._prof_with_body_geometry(
+                {"spacing": {"before_twips": 240, "after_twips": 120}}
+            )
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            ppr_xml = "\n".join(_out_ppr_xml(out))
+            self.assertIn('w:before="240"', ppr_xml)
+            self.assertIn('w:after="120"', ppr_xml)
+
+    def test_indent_applied_independent_from_spacing(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            prof = self._prof_with_body_geometry({"indentation": {"left_twips": 720}})
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            ppr_xml = "\n".join(_out_ppr_xml(out))
+            self.assertIn('w:left="720"', ppr_xml)
+            self.assertNotIn("w:spacing", ppr_xml)
+
+    def test_geometry_not_written_when_set(self):
+        # Set-only-when-unset: a paragraph whose style already carries explicit
+        # spacing-before is NOT clobbered. We assert by writing geometry onto a
+        # paragraph that already has an authored value via the IR is not possible
+        # directly; instead we apply the backend twice and confirm the SECOND value
+        # (a different one) does not overwrite the first.
+        from brandkit.formats.docx import generate as gen
+
+        doc = Document()
+        para = doc.add_paragraph("x")
+        _set_spacing(para, before=360)  # authored
+        gen._apply_paragraph_geometry(para, {"spacing": {"before_twips": 240}})
+        sp = para._p.find(qn("w:pPr")).find(qn("w:spacing"))
+        self.assertEqual(sp.get(qn("w:before")), "360")  # authored value preserved
+
+    def test_borders_applied_as_element_copy(self):
+        # The captured serialized border is re-emitted byte-identically.
+        from brandkit.formats.docx import generate as gen
+        from lxml import etree
+
+        src = Document()
+        p = src.add_paragraph("x")
+        _set_top_border(p, val="double", sz="12", color="FF0000")
+        captured = etree.tostring(
+            p._p.find(qn("w:pPr")).find(qn("w:pBdr")).find(qn("w:top")),
+            encoding="unicode",
+        )
+        doc = Document()
+        target = doc.add_paragraph("y")
+        gen._apply_paragraph_geometry(target, {"borders": {"top": captured}})
+        applied = etree.tostring(
+            target._p.find(qn("w:pPr")).find(qn("w:pBdr")).find(qn("w:top")),
+            encoding="unicode",
+        )
+        self.assertEqual(applied, captured)
+
+    def test_shading_applied_set_only_when_unset(self):
+        from brandkit.formats.docx import generate as gen
+
+        doc = Document()
+        para = doc.add_paragraph("x")
+        gen._apply_paragraph_geometry(para, {"shading": {"fill_hex": "ABCDEF"}})
+        shd = para._p.find(qn("w:pPr")).find(qn("w:shd"))
+        self.assertEqual(shd.get(qn("w:fill")), "ABCDEF")
+        # second apply with a different fill must NOT clobber the now-set fill
+        gen._apply_paragraph_geometry(para, {"shading": {"fill_hex": "123456"}})
+        shd = para._p.find(qn("w:pPr")).find(qn("w:shd"))
+        self.assertEqual(shd.get(qn("w:fill")), "ABCDEF")
+
+    def test_empty_geometry_is_noop(self):
+        from brandkit.formats.docx import generate as gen
+
+        doc = Document()
+        para = doc.add_paragraph("x")
+        had_ppr = para._p.find(qn("w:pPr")) is not None
+        gen._apply_paragraph_geometry(para, {})
+        # no geometry -> no injected pPr beyond what already existed
+        self.assertEqual(para._p.find(qn("w:pPr")) is not None, had_ppr)
+
+    def test_geometry_and_font_size_compose(self):
+        # Geometry composes with the run typography axes, independently.
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td), size_hp=22)
+            out = Path(td) / "out.docx"
+            prof = _profile(
+                theme={
+                    "colors": {},
+                    "fonts": {"body": {"latin": "Roboto", "size_hp": 22}},
+                    "geometry": {"body": {"spacing": {"before_twips": 240}}},
+                }
+            )
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            runs = [r for p in Document(out).paragraphs for r in p.runs if r.text]
+            self.assertIn("Roboto", {r.font.name for r in runs})
+            self.assertIn(Pt(11), {r.font.size for r in runs})
+            self.assertIn('w:before="240"', "\n".join(_out_ppr_xml(out)))
+
+
+# ---------------------------------------------------------------------------
+# byte-identity: a no-geometry profile takes ZERO new branches
+# ---------------------------------------------------------------------------
+class GeometryByteIdentityTest(unittest.TestCase):
+    def _gen_hash(self, prof):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            out = Path(td) / "out.docx"
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "hi"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            import hashlib
+
+            return hashlib.sha256(out.read_bytes()).hexdigest()
+
+    def test_no_geometry_profile_is_unchanged_from_empty(self):
+        # A profile with an empty/absent geometry produces the same bytes as a profile
+        # that never had a geometry key at all (zero-branch on no-capture).
+        plain = _profile(theme={"colors": {}, "fonts": {}})
+        with_empty_geom = _profile(theme={"colors": {}, "fonts": {}, "geometry": {}})
+        self.assertEqual(self._gen_hash(plain), self._gen_hash(with_empty_geom))
+
+    def test_geometry_apply_is_byte_idempotent(self):
+        prof = _profile(
+            theme={
+                "colors": {},
+                "fonts": {},
+                "geometry": {"body": {"spacing": {"before_twips": 240}}},
+            }
+        )
+        self.assertEqual(self._gen_hash(prof), self._gen_hash(prof))
+
+
+# ---------------------------------------------------------------------------
+# check: well-formed + observed-floor passes; malformed/synthesized rejected
+# ---------------------------------------------------------------------------
+class GeometryTargetsCheckTest(unittest.TestCase):
+    def _shell_with_geometry(self, tmp_path, geom_fn):
+        shell = tmp_path / "shell.docx"
+        d = Document()
+        for _ in range(2):
+            geom_fn(d.add_paragraph("provenance"))
+        d.save(shell)
+        return shell
+
+    def _prof(self, geometry):
+        prof = schema.build_envelope("docx", {"name": "g"})
+        prof["surface"] = {"docx": {}}
+        prof["theme"] = {"colors": {}, "fonts": {}, "geometry": {"body": geometry}}
+        prof["roles"] = {"_index": []}
+        return prof
+
+    def test_observed_spacing_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_spacing(p, before=240)
+            )
+            prof = self._prof({"spacing": {"before_twips": 240}})
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertEqual(findings, [])
+
+    def test_synthesized_spacing_not_observed_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_spacing(p, before=240)
+            )
+            prof = self._prof({"spacing": {"before_twips": 333}})  # not on the shell
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertTrue(
+                any(
+                    f.check == "appearance_geometry_targets"
+                    and f.severity == schema.Severity.ERROR.value
+                    for f in findings
+                )
+            )
+
+    def test_out_of_range_twips_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_spacing(p, before=240)
+            )
+            prof = self._prof({"spacing": {"before_twips": 999999}})
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertTrue(any("out of the sane" in f.message for f in findings))
+
+    def test_non_integer_twips_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_spacing(p, before=240)
+            )
+            prof = self._prof({"spacing": {"before_twips": "not_an_int"}})
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertTrue(any("not an integer" in f.message for f in findings))
+
+    def test_observed_border_passes_and_synthesized_fails(self):
+        from lxml import etree
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(Path(td), lambda p: _set_top_border(p))
+            # read the shell's own serialized top border to use as the captured value
+            facts = checks_deterministic._docx_collect_geometry_facts(shell)
+            observed_top = next(iter(facts.borders["top"]))
+            ok = self._prof({"borders": {"top": observed_top}})
+            self.assertEqual(checks_deterministic.check_geometry_targets(shell, ok), [])
+            # a synthesized (different) border is rejected
+            synth = OxmlElement("w:top")
+            synth.set(qn("w:val"), "wave")
+            synth.set(qn("w:sz"), "48")
+            synth.set(qn("w:color"), "00FF00")
+            bad = self._prof(
+                {"borders": {"top": etree.tostring(synth, encoding="unicode")}}
+            )
+            findings = checks_deterministic.check_geometry_targets(shell, bad)
+            self.assertTrue(any("border" in f.message for f in findings))
+
+    def test_malformed_border_missing_val_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(Path(td), lambda p: _set_top_border(p))
+            # a border element missing the required w:val attribute
+            bad_xml = (
+                '<w:top xmlns:w="http://schemas.openxmlformats.org/'
+                'wordprocessingml/2006/main" w:sz="4"/>'
+            )
+            prof = self._prof({"borders": {"top": bad_xml}})
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertTrue(
+                any("valid WordprocessingML border" in f.message for f in findings)
+            )
+
+    def test_malformed_shading_hex_is_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_shading(p, "ABCDEF")
+            )
+            prof = self._prof({"shading": {"fill_hex": "nothex"}})
+            findings = checks_deterministic.check_geometry_targets(shell, prof)
+            self.assertTrue(any("not a valid #RRGGBB" in f.message for f in findings))
+
+    def test_no_geometry_profile_has_no_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = schema.build_envelope("docx", {"name": "g"})
+            prof["theme"] = {"colors": {}, "fonts": {}}
+            prof["roles"] = {"_index": []}
+            self.assertEqual(
+                checks_deterministic.check_geometry_targets(shell, prof), []
+            )
+
+    def test_non_docx_kind_is_noop(self):
+        with tempfile.TemporaryDirectory() as td:
+            shell = _shell(Path(td))
+            prof = self._prof({"spacing": {"before_twips": 240}})
+            prof["kind"] = "pptx"
+            self.assertEqual(
+                checks_deterministic.check_geometry_targets(shell, prof), []
+            )
+
+    def test_wired_into_run_qa(self):
+        # The geometry check runs inside run_qa: a synthesized value surfaces as a
+        # finding from the gate, not only from the standalone function.
+        from brandkit.qa import gate
+
+        with tempfile.TemporaryDirectory() as td:
+            shell = self._shell_with_geometry(
+                Path(td), lambda p: _set_spacing(p, before=240)
+            )
+            out = Path(td) / "out.docx"
+            prof = self._prof({"spacing": {"before_twips": 333}})
+            idoc = ir.IntermediateDocument(blocks=[ir.Paragraph(runs=[{"t": "x"}])])
+            docx_generate.generate(prof, shell, idoc, out)
+            report = gate.run_qa(out, prof, shell=shell)
+            self.assertTrue(
+                any(f.check == "appearance_geometry_targets" for f in report.findings)
+            )
+
+
+# ---------------------------------------------------------------------------
+# end-to-end: extract a template with dominant geometry -> profile -> generate
+# -> geometry applied -> check passes
+# ---------------------------------------------------------------------------
+class GeometryEndToEndTest(unittest.TestCase):
+    def test_extract_apply_verify_geometry(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            template = tmp / "template.docx"
+            d = Document()
+            # A dominant body indentation across many paragraphs.
+            for _ in range(6):
+                _set_indent(d.add_paragraph("body content"), left=720)
+            d.save(template)
+
+            roles = {"_index": []}
+            theme = {"colors": {}, "fonts": {}}
+            typography.capture_geometry(Document(template), roles, theme)
+            self.assertEqual(
+                theme["geometry"]["body"]["indentation"]["left_twips"], 720
+            )
+
+            prof = _profile(
+                theme={"colors": {}, "fonts": {}, "geometry": theme["geometry"]}
+            )
+            out = tmp / "out.docx"
+            idoc = ir.IntermediateDocument(
+                blocks=[ir.Paragraph(runs=[{"t": "generated"}])]
+            )
+            docx_generate.generate(prof, template, idoc, out)
+            self.assertIn('w:left="720"', "\n".join(_out_ppr_xml(out)))
+            # the captured value is observed on the template -> check passes
+            self.assertEqual(
+                checks_deterministic.check_geometry_targets(template, prof), []
+            )
+
+    def test_extract_full_profile_carries_geometry(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            template = tmp / "template.docx"
+            d = Document()
+            for _ in range(6):
+                _set_spacing(d.add_paragraph("body"), before=200, after=200)
+            d.save(template)
+            saved = docx_extract.extract(template, "geomprof", cwd=tmp)
+            import json
+
+            profile = json.loads(Path(saved).read_text())
+            body_geom = profile["theme"]["geometry"]["body"]
+            self.assertEqual(body_geom["spacing"]["before_twips"], 200)
+            self.assertEqual(body_geom["spacing"]["after_twips"], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

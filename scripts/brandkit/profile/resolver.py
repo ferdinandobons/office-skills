@@ -351,9 +351,10 @@ class ProfileResolver:
     def _read_default_appearance(profile: dict) -> dict:
         """The document-level captured body typography, as an ``appearance`` dict.
 
-        Three INDEPENDENT axes: the body font/size live under ``theme.fonts.body``
-        and the body color under the additive ``theme.text.body`` key. Each axis is
-        included only when the template actually captured it, so a pre-feature
+        FOUR INDEPENDENT axes: the body font/size live under ``theme.fonts.body``,
+        the body color under the additive ``theme.text.body`` key, and the body
+        paragraph GEOMETRY (Cluster D1, docx-only) under ``theme.geometry.body``. Each
+        axis is included only when the template actually captured it, so a pre-feature
         profile yields an empty dict (behavior unchanged)."""
         if not profile:
             return {}
@@ -370,6 +371,9 @@ class ProfileResolver:
         color = text_body.get("color")
         if color:
             out["color"] = color
+        geometry = (theme.get("geometry") or {}).get("body")
+        if geometry:
+            out["geometry"] = geometry
         return out
 
     def _merge_appearance(
@@ -386,7 +390,15 @@ class ProfileResolver:
         other role that resolves to a real named style with its own intrinsic
         larger/colored typography: forcing the body size/color as DIRECT run
         formatting would override that style's intrinsic value (shrinking/recoloring
-        headings). A role-SPECIFIC captured size/color still applies to any role."""
+        headings). A role-SPECIFIC captured size/color still applies to any role.
+
+        GEOMETRY (Cluster D1, docx-only) is the fourth INDEPENDENT axis and DELIBERATELY
+        has NO family gate (unlike size/color): a role's OWN captured geometry always
+        applies (indentation/spacing on a heading is intentional branding, not a
+        default leak), and the body geometry default fills in for EVERY role that has
+        none. This differs from size/color on purpose - a heading with no captured
+        geometry stays clean (no spurious body-geometry bleed) because the body default
+        only ever ADDS the properties the template actually captured document-wide."""
         role_appearance = role_appearance or {}
         default = self._default_appearance
 
@@ -413,6 +425,16 @@ class ProfileResolver:
             # an AUTO body/role theme color renders in headless LibreOffice too and a
             # clrScheme-slot color is realizable via the hex at apply time.
             out["color"] = self._enrich_theme_hex(color)
+
+        # GEOMETRY: role-specific wins, else the body default (NO family gate). A role
+        # carrying its own geometry uses it verbatim; otherwise the body geometry (if
+        # captured) flows through. Absent on both sides ⇒ no key (byte-identical
+        # no-geometry path). The captured value is passed VERBATIM (twips/border copies
+        # are facts the apply side re-emits and the check re-validates against the
+        # shell's own observed geometry).
+        geometry = role_appearance.get("geometry") or default.get("geometry")
+        if geometry:
+            out["geometry"] = geometry
         return out
 
     @staticmethod

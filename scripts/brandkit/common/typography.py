@@ -289,6 +289,194 @@ def capture_appearance(
             appearance["color_confidence"] = round(dom_color[1], 3)
 
 
+# ---------------------------------------------------------------------------
+# Paragraph GEOMETRY capture (Cluster D1, DOCX-ONLY).
+# ---------------------------------------------------------------------------
+# Geometry is the FOURTH appearance axis (after font / size / color), but unlike the
+# three typographic axes it is NOT a single value per role: a paragraph carries many
+# INDEPENDENT geometry properties (spacing before/after/line, four indents, four
+# border sides, a shading fill). Each property is its OWN axis under the SAME
+# :func:`_dominant` floor (a paragraph with no explicit value on a property votes
+# ``None``, counting in the denominator but never winning), so a role records only the
+# properties that DOMINATE its own paragraphs. Nothing is hardcoded to any template's
+# twips - the threshold is purely MIN_RUNS + MIN_DOMINANCE on the template's own
+# ``w:pPr`` values, exactly like font/size/color. This engine is format-neutral; the
+# docx adapter (``formats/docx/typography.py``) is the ONLY producer of
+# :class:`ParaGeometryFacts` (it reads ``w:pPr``). pptx/xlsx never call it (D1 is
+# WordprocessingML pPr only); a profile that carries no captured geometry leaves
+# ``role.appearance.geometry`` absent, so the no-geometry path takes ZERO new branches
+# and docx output stays byte-identical.
+
+# The scalar geometry properties, grouped as they are stored under
+# ``appearance.geometry`` (a dotted "<group>.<field>" key into the right sub-dict).
+# Borders and shading are NOT here (they are element/hex shapes, captured separately).
+_GEOMETRY_SCALAR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("spacing", "before_twips"),
+    ("spacing", "after_twips"),
+    ("spacing", "line_twips"),
+    ("spacing", "line_rule"),
+    ("indentation", "left_twips"),
+    ("indentation", "right_twips"),
+    ("indentation", "first_line_twips"),
+    ("indentation", "hanging_twips"),
+)
+
+# The four WordprocessingML paragraph border sides a ``w:pBdr`` can carry, captured
+# each as its own dominant axis (the serialized element, an opaque copy).
+_GEOMETRY_BORDER_SIDES: tuple[str, ...] = ("top", "bottom", "left", "right")
+
+
+@runtime_checkable
+class ParaGeometryFacts(Protocol):
+    """The structural (duck-typed) view of ONE paragraph's geometry the engine folds.
+
+    The docx adapter yields one per paragraph, reading ``w:pPr`` explicitly: a field
+    is ``None`` when the paragraph does NOT carry that property directly (it inherits
+    from the style), so it votes "inherit". ``style_key`` is the paragraph's owning
+    style identity (the per-role fold key, same shape as :class:`RunFacts`).
+
+      - the scalar fields mirror :data:`_GEOMETRY_SCALAR_FIELDS` (twips as ``int``,
+        ``line_rule`` as a small ``str`` token like ``'auto'``/``'exact'``);
+      - ``borders`` is a ``{side: <opaque serialized element str>}`` map of the sides
+        the paragraph carries directly (a byte-copy the apply side re-emits verbatim);
+      - ``shading_fill_hex`` is the ``w:shd@w:fill`` normalized hex, or ``None``.
+    """
+
+    style_key: Optional[tuple[Optional[str], Optional[str]]]
+    spacing_before_twips: Optional[int]
+    spacing_after_twips: Optional[int]
+    spacing_line_twips: Optional[int]
+    spacing_line_rule: Optional[str]
+    indent_left_twips: Optional[int]
+    indent_right_twips: Optional[int]
+    indent_first_line_twips: Optional[int]
+    indent_hanging_twips: Optional[int]
+    borders: dict[str, str]
+    shading_fill_hex: Optional[str]
+
+
+# The ParaGeometryFacts attribute that feeds each scalar (group, field) axis.
+_GEOMETRY_SCALAR_ATTR: dict[tuple[str, str], str] = {
+    ("spacing", "before_twips"): "spacing_before_twips",
+    ("spacing", "after_twips"): "spacing_after_twips",
+    ("spacing", "line_twips"): "spacing_line_twips",
+    ("spacing", "line_rule"): "spacing_line_rule",
+    ("indentation", "left_twips"): "indent_left_twips",
+    ("indentation", "right_twips"): "indent_right_twips",
+    ("indentation", "first_line_twips"): "indent_first_line_twips",
+    ("indentation", "hanging_twips"): "indent_hanging_twips",
+}
+
+
+def _fold_geometry(geometry_facts: list, key_match) -> dict:
+    """Fold a list of :class:`ParaGeometryFacts` (already filtered to a role, or ALL of
+    them for the body default) into a captured ``geometry`` dict, every property gated
+    by the SAME :func:`_dominant` floor INDEPENDENTLY.
+
+    ``key_match(fact) -> bool`` selects which facts vote (a role unions every paragraph
+    whose style matches; the body default takes them all). Returns ``{}`` when nothing
+    dominates, so the caller writes no ``geometry`` key (zero-branch on no-capture)."""
+    facts = [f for f in geometry_facts if key_match(f)]
+    if not facts:
+        return {}
+
+    out: dict[str, Any] = {}
+    confidence: dict[str, float] = {}
+
+    # (a) scalar spacing / indentation axes - each its own dominance Counter.
+    for group, field in _GEOMETRY_SCALAR_FIELDS:
+        attr = _GEOMETRY_SCALAR_ATTR[(group, field)]
+        counter: Counter = Counter()
+        for f in facts:
+            counter[getattr(f, attr)] += 1
+        dom = _dominant(counter)
+        if dom is None:
+            continue
+        out.setdefault(group, {})[field] = dom[0]
+        confidence[f"{group}.{field}"] = round(dom[1], 3)
+
+    # (b) each border side is its own dominance axis over the serialized element; a
+    # paragraph with no ``w:pBdr`` side votes ``None`` (inherit) on that side.
+    borders: dict[str, str] = {}
+    for side in _GEOMETRY_BORDER_SIDES:
+        counter = Counter()
+        for f in facts:
+            counter[f.borders.get(side)] += 1
+        dom = _dominant(counter)
+        if dom is None:
+            continue
+        borders[side] = dom[0]
+        confidence[f"borders.{side}"] = round(dom[1], 3)
+    if borders:
+        out["borders"] = borders
+
+    # (c) shading fill hex - one dominance axis.
+    counter = Counter()
+    for f in facts:
+        counter[f.shading_fill_hex] += 1
+    dom = _dominant(counter)
+    if dom is not None:
+        out["shading"] = {"fill_hex": dom[0]}
+        confidence["shading.fill_hex"] = round(dom[1], 3)
+
+    if not out:
+        return {}
+    out["confidence"] = confidence
+    return out
+
+
+def capture_paragraph_geometry(
+    geometry_facts: Iterable,
+    roles: dict,
+    theme: dict,
+    *,
+    role_style_key: Callable[[dict], Optional[tuple]] = _role_style_key_default,
+) -> None:
+    """Capture dominant paragraph GEOMETRY into ``roles`` (per role
+    ``appearance.geometry``) and the document default (``theme['geometry']['body']``),
+    mutating both in place. DOCX-ONLY (the only caller is the docx extractor).
+
+    Each geometry property (spacing before/after/line + line rule, the four indents,
+    the four border sides, shading fill) is an INDEPENDENT axis under the SAME
+    :func:`_dominant` floor used for font/size/color: a property is recorded for a role
+    only when an explicit value DOMINATES that role's own paragraphs (and the body
+    default only when it dominates ALL paragraphs). A property with no dominance writes
+    NO key, so a template with no convention leaves ``geometry`` absent and the
+    no-geometry path is byte-identical. Confidence (the dominance ratio per property)
+    is stored under ``geometry['confidence']`` keyed by ``"<group>.<field>"``.
+
+    ``geometry_facts`` is materialized once into a list (the per-role fold replays it),
+    so the caller may pass a single ordered generator over the document's paragraphs.
+    """
+    facts = list(geometry_facts)
+    if not facts:
+        return
+
+    body = _fold_geometry(facts, lambda f: True)
+    if body:
+        theme.setdefault("geometry", {})["body"] = body
+
+    for rid, entry in roles.items():
+        if rid == "_index" or not isinstance(entry, dict):
+            continue
+        key = role_style_key(entry)
+        if key is None:
+            continue
+        sid, sname = key[0], key[1]
+
+        def _match(f, sid=sid, sname=sname) -> bool:
+            k = f.style_key
+            if k is None:
+                return False
+            k_sid, k_sname = k[0], k[1]
+            return bool((sid and k_sid == sid) or (sname and k_sname == sname))
+
+        geom = _fold_geometry(facts, _match)
+        if not geom:
+            continue
+        entry.setdefault("appearance", {})["geometry"] = geom
+
+
 def capture_palette_facts(
     run_facts: Iterable[RunFacts], roles: dict, theme: dict
 ) -> None:

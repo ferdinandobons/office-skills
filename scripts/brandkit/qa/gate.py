@@ -96,6 +96,11 @@ def run_qa(
     # Shell-backed peer of resolver targets: every captured/applied font must be one
     # the shell actually carries (fail-closed). No-op when no appearance is present.
     findings = findings + checks_deterministic.check_appearance_targets(shell, profile)
+    # Honest fail-closed peer for the paragraph-GEOMETRY axis (Cluster D1, docx-only):
+    # every applied spacing/indent/border/shading value must be WELL-FORMED and a value
+    # the template's OWN paragraphs carried (the captured floor), never synthesized.
+    # No-op for non-docx kinds and when no geometry is captured (pre-D1 profiles).
+    findings = findings + checks_deterministic.check_geometry_targets(shell, profile)
     # Fail-closed comprehension-target membership (sibling of resolver targets):
     # every load-bearing comprehension ref must be a verbatim id from the surfaced
     # inventories. No-ops when comprehension is absent (model-free CI path,
