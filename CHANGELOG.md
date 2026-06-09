@@ -4,6 +4,28 @@ All notable changes to BrandDocs are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-09
+
+A robustness fix for real-world templates. No schema, profile or output change for
+well-formed templates; profiles from earlier versions keep working unchanged.
+
+### Fixed
+
+- DOCX `extract` and `generate` no longer crash on templates whose section
+  measures are non-integer twips (e.g. `1440.0000000000002` in `w:pgMar` /
+  `w:pgSz`, emitted by some editors). python-docx parses measures with `int()`
+  and raises the moment any code touches the value, including its own internals
+  (`Document.add_table` derives the table width from `section.left_margin`). The
+  shell's section measures are now sanitized in place (sub-twip rounding, so the
+  page geometry is visually identical) and every section-length read tolerates the
+  malformed value via a raw-twips fallback.
+
+### Tests
+
+- `MalformedSectionMeasureTest`: the section-length helpers tolerate the bad
+  value, `sanitize_section_measures` repairs it in place, and a generate with a
+  table block (the exact crash path) survives a malformed margin.
+
 ## [0.6.1] - 2026-06-09
 
 A clean finished checkpoint: the remaining LOW items from the v0.6.0 review are
@@ -312,6 +334,7 @@ Initial public alpha release.
   share the same engine and are intentionally catching up through the eval
   suite and visual repair workflow.
 
+[0.6.2]: https://github.com/ferdinandobons/brand-docs/releases/tag/v0.6.2
 [0.6.1]: https://github.com/ferdinandobons/brand-docs/releases/tag/v0.6.1
 [0.6.0]: https://github.com/ferdinandobons/brand-docs/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ferdinandobons/brand-docs/releases/tag/v0.5.0
