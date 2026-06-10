@@ -179,6 +179,12 @@ exploration close the current roadmap:
   issues; quick start wired to the shipped example templates; engine module
   README; PLUGIN_WORKFLOW diagram refresh with a drift guard; maturity-status
   reframing; CITATION link; NOTICE clarity.
+  - **DONE (2026-06-10).** Issue/PR templates, quick start, status reframing,
+    CITATION link and NOTICE landed with the v0.8.0/v0.8.1 reviews; this pass
+    added the expanded CONTRIBUTING, `scripts/brandkit/README.md`, the written
+    release checklist in DEVELOPMENT.md, the ten-verb + learning-loop refresh
+    of PLUGIN_WORKFLOW.md guarded by `tests/test_doc_drift.py`, and three
+    sized good-first-issues (#4 S, #5 M, #6 L).
 - **P2, reach:** documented Python API surface (`brandkit` exports +
   docstrings), `brand-docs-engine` on PyPI, Dockerfile + ghcr image, pinned
   requirements, Python 3.13 CI lane, two-phase workflow section in README.

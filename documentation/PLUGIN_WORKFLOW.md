@@ -29,7 +29,28 @@ The slash commands in `commands/` are thin wrappers over the internal CLI:
 | `/brand-list` | `python scripts/brandkit/cli.py list ...` |
 
 The agent-facing skills are the intended user experience. The CLI is the engine
-used by those skills for deterministic work.
+used by those skills for deterministic work. The full verb surface:
+
+| CLI verb | Purpose |
+|---|---|
+| `extract` | template -> reusable Brand Profile (+ frozen shell + `PROFILE.md`) |
+| `comprehend-input` | surface bounded facts + excerpt for the model (read-only) |
+| `comprehend` | validate the model's comprehension fail-closed, freeze it into the profile |
+| `verify` | deterministic QA findings + verdict on a saved profile |
+| `generate` | content + profile -> on-brand document, then the QA gate |
+| `learn` | distill cross-run `generation_report.json` history into an ADVISORY lesson |
+| `propose-overrides` | validate a model-authored overrides proposal (ADVISORY until accepted) |
+| `refine` | fold a model-authored refinement into the comprehension block (diff first) |
+| `list` | enumerate saved profiles per scope |
+| `doctor` | probe the environment (deps, renderers, OCR) with repair hints |
+
+The learning trio (`learn` / `propose-overrides` / `refine`) is deliberately
+two-staged: every distilled or proposed lesson lands ADVISORY (status `absent`,
+resolver untouched, output byte-identical) and goes live only on an explicit
+`--accept`, so a single noisy run can never mint a permanent live rule.
+
+A drift guard (`tests/test_doc_drift.py`) asserts every CLI verb and every
+slash command in `commands/` is documented in this file.
 
 ## Current End-to-End Flow
 
@@ -77,6 +98,13 @@ flowchart TD
     FIX -->|Yes| REP["repair IDoc/GridDoc/composition"]
     REP --> G
     MODE -->|strict + renderers unavailable| FAIL["ERROR visual.strict_unavailable"]
+
+    G --> REPT["append run evidence -> generation_report.json"]
+    REPT -.-> LRN["learn (deterministic distill) / propose-overrides (model proposal)"]
+    LRN -.-> ACC{"--accept?"}
+    ACC -.->|Yes| LIVE["rules.overrides go live for future generations"]
+    ACC -.->|No| ADV["ADVISORY only: resolver untouched, byte-identical output"]
+    LIVE -.-> REUSE
 ```
 
 The optional `comprehend` step (the `Need comprehension?` branch) is where the
@@ -86,6 +114,13 @@ every proposal fail-closed and freezes it into the profile, so later generation
 reuses the fragments (with `{{slot}}` substitution) instead of re-deriving them.
 It is optional: an absent comprehension leaves generation on the deterministic
 path.
+
+The dashed tail is the **learning loop**: every `generate` appends its QA
+evidence to the profile's `generation_report.json`; `learn` (deterministic) or
+`propose-overrides` (model-driven, validated fail-closed) distill that history
+into `rules.overrides`, and `refine` folds model-authored refinements into the
+comprehension block. All three stay ADVISORY until an explicit `--accept`, so
+the brand guarantee never depends on the loop being right.
 
 ## Target Autonomous Repair Flow
 
