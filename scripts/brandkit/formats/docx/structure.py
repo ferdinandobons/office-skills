@@ -34,6 +34,7 @@ import re
 from typing import Optional
 
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 from brandkit.ooxml.fields import iter_complex_field_events
 from brandkit.ooxml.names import local_name as _local_name, make_qn
@@ -1308,7 +1309,10 @@ def append_outline_toc_field(doc, *, max_level: int = 3):
     return p
 
 
-def refresh_visible_outline_toc_cache(doc, headings: list[tuple[int, str]]) -> int:
+def refresh_visible_outline_toc_cache(
+    doc,
+    headings: "list[tuple[int, str]] | list[tuple[int, str, object]]",
+) -> int:
     """Rewrite the visible cache of outline TOC fields from generated headings.
 
     Word/LibreOffice store a field *result* alongside the TOC field code. Marking
@@ -1317,27 +1321,398 @@ def refresh_visible_outline_toc_cache(doc, headings: list[tuple[int, str]]) -> i
     outline TOC field updateable while replacing the visible cache with the
     generated document's current headings, so visual audit does not show template
     sample entries.
-    """
-    clean_headings = [
-        (max(1, int(level or 1)), str(text).strip())
-        for level, text in headings
-        if str(text).strip()
-    ]
-    if not clean_headings:
-        return 0
 
-    rewritten = 0
-    for child in list(doc.element.body):
+    Each heading is ``(level, text)`` or ``(level, text, w:p element)``. When every
+    heading carries its live generated paragraph element AND at least one outline
+    TOC field's old cache is well-formed enough to harvest, the cache is rewritten
+    in the *Word-faithful* shape: bookmarks are authored around the generated
+    heading paragraphs and each cache entry becomes a paragraph whose ``pPr`` is
+    deep-copied from the template's own old cached entry of the SAME level,
+    carrying a ``w:hyperlink`` to the heading's bookmark plus a nested dirty
+    ``PAGEREF`` field (no cached page number). Otherwise - legacy 2-tuple callers,
+    a malformed cache, or detached heading elements - the function falls back, per
+    field and all-or-nothing, to the simple plain-text rewrite, and authors ZERO
+    bookmarks. Documents without an outline TOC are never mutated.
+    """
+    headings3 = _normalize_outline_headings(headings)
+    if not headings3:
+        return 0
+    plain_headings = [(level, text) for level, text, _ in headings3]
+
+    body = doc.element.body
+    children = list(body)
+    spans = _toc_field_begins(children)
+
+    # PHASE 1 - PLAN (strictly read-only). One plan per outline TOC field;
+    # ``rich`` is decided per field, once, before any mutation. Fail-closed: a
+    # field is rewritten either in the FULL Word-faithful shape or by the exact
+    # current plain writer - no hybrid output exists by construction.
+    plans: list[dict] = []
+    for i, child in enumerate(children):
+        if _is_sectpr(child):
+            continue
         instr = _outline_toc_instruction(child)
         if instr is None:
             continue
-        if _local_name(child.tag) == "sdt":
-            if _rewrite_sdt_outline_toc_cache(child, instr, clean_headings):
+        tag = _local_name(child.tag)
+        if tag == "sdt":
+            plan = _plan_sdt_outline_rewrite(child, instr, i)
+            if plan is not None:
+                plans.append(plan)
+        elif tag == "p":
+            plans.append(
+                _plan_paragraph_outline_rewrite(child, instr, i, children, spans)
+            )
+    if not plans:
+        return 0
+
+    # PHASE 2 - bookmark authoring (the only doc-level mutation outside the
+    # fields). Bookmarks exist ONLY when an outline TOC is present (a plan exists)
+    # AND at least one field takes the rich shape AND every heading carries its
+    # live generated paragraph; otherwise every plan is demoted to the plain
+    # writer and zero bookmarks are authored (today's bytes exactly).
+    rich_mode = any(p["rich"] for p in plans) and all(
+        _is_live_paragraph(para, doc) for _, _, para in headings3
+    )
+    if rich_mode:
+        bookmark_names = _author_heading_bookmarks(doc, headings3)
+    else:
+        bookmark_names = []
+        for plan in plans:
+            plan["rich"] = False
+
+    # PHASE 3 - MUTATE, last-first (descending top-level position) so a
+    # bare-paragraph span splice never shifts an earlier plan's body position.
+    # Plans hold element handles captured in phase 1; indices are never
+    # re-derived mid-mutation.
+    rewritten = 0
+    for plan in sorted(plans, key=lambda p: p["top_index"], reverse=True):
+        if plan["kind"] == "sdt":
+            if plan["rich"]:
+                _apply_rich_sdt_outline_plan(plan, headings3, bookmark_names)
                 rewritten += 1
-        elif _local_name(child.tag) == "p":
-            _rewrite_paragraph_outline_toc_cache(child, instr, clean_headings)
+            elif _rewrite_sdt_outline_toc_cache(
+                plan["el"], plan["instr"], plain_headings
+            ):
+                rewritten += 1
+        else:
+            if plan["rich"]:
+                _apply_rich_paragraph_outline_plan(
+                    plan, body, headings3, bookmark_names
+                )
+            else:
+                _rewrite_paragraph_outline_toc_cache(
+                    plan["el"], plan["instr"], plain_headings
+                )
             rewritten += 1
     return rewritten
+
+
+def _normalize_outline_headings(headings) -> list[tuple[int, str, object]]:
+    """Normalize heading items to ``(level, text, paragraph-or-None)`` 3-tuples.
+
+    Items of length 2 carry no paragraph element (legacy callers); items of any
+    other arity, or with an unusable level, are dropped (fail-closed - never
+    raise). Empty-text items are dropped exactly as before.
+    """
+    out: list[tuple[int, str, object]] = []
+    for item in headings or []:
+        try:
+            arity = len(item)
+        except TypeError:
+            continue
+        if arity == 3:
+            level, text, para = item
+        elif arity == 2:
+            level, text = item
+            para = None
+        else:
+            continue
+        try:
+            lvl = max(1, int(level or 1))
+        except (TypeError, ValueError):
+            continue
+        txt = str(text).strip()
+        if txt:
+            out.append((lvl, txt, para))
+    return out
+
+
+def _is_live_paragraph(para, doc) -> bool:
+    """True when ``para`` is an element attached to ``doc``'s main document part."""
+    if para is None:
+        return False
+    try:
+        return para.getroottree().getroot() is doc.element
+    except Exception:
+        return False
+
+
+def _plan_sdt_outline_rewrite(sdt, instr: str, top_index: int) -> Optional[dict]:
+    """Plan (read-only) the rewrite of an SDT-wrapped outline TOC field.
+
+    Returns None when the SDT carries no ``sdtContent`` or no field paragraph -
+    exactly the cases today's writer bails on without counting. Otherwise the
+    plan is ``rich`` when the old cache could be harvested, else plain.
+    """
+    content = sdt.find(w("sdtContent"))
+    if content is None:
+        return None
+    paras = [el for el in list(content) if _local_name(el.tag) == "p"]
+    field_idx = next(
+        (i for i, p in enumerate(paras) if _outline_toc_instruction(p) is not None),
+        None,
+    )
+    if field_idx is None:
+        return None
+    plan: dict = {
+        "kind": "sdt",
+        "el": sdt,
+        "instr": instr,
+        "top_index": top_index,
+        "rich": False,
+        "content": content,
+        "old_field_para": paras[field_idx],
+        "stale_paras": paras[field_idx:],
+    }
+    try:
+        level_pprs, first_ppr = _harvest_outline_entry_pprs(paras[field_idx:])
+        plan.update(rich=True, level_pprs=level_pprs, first_ppr=first_ppr)
+    except Exception:
+        plan["rich"] = False
+    return plan
+
+
+def _plan_paragraph_outline_rewrite(
+    p, instr: str, top_index: int, children: list, spans: list[dict]
+) -> dict:
+    """Plan (read-only) the rewrite of a bare-paragraph outline TOC field.
+
+    The field's full top-level span is resolved from the ``_toc_field_begins``
+    inventory (the begin paragraph is ``children[top_index]``). An unresolvable
+    or malformed span demotes the plan to the plain writer - which rewrites only
+    the begin paragraph, exactly what runs today on such input.
+    """
+    plan: dict = {
+        "kind": "p",
+        "el": p,
+        "instr": instr,
+        "top_index": top_index,
+        "rich": False,
+    }
+    try:
+        span = next(
+            (
+                f
+                for f in spans
+                if f.get("seq_id") is None and f.get("begin_index") == top_index
+            ),
+            None,
+        )
+        if span is None:
+            return plan
+        begin_i, end_i = span.get("begin_index"), span.get("end_index")
+        if (
+            begin_i is None
+            or end_i is None
+            or end_i < begin_i
+            or begin_i < 0
+            or end_i >= len(children)
+        ):
+            return plan
+        span_els = children[begin_i : end_i + 1]
+        candidates = [el for el in span_els if _local_name(el.tag) == "p"]
+        level_pprs, first_ppr = _harvest_outline_entry_pprs(candidates)
+        plan.update(
+            rich=True, level_pprs=level_pprs, first_ppr=first_ppr, span_els=span_els
+        )
+    except Exception:
+        plan["rich"] = False
+    return plan
+
+
+def _harvest_outline_entry_pprs(candidate_paras) -> "tuple[dict[int, object], object]":
+    """Harvest a ``{level: pPr}`` map from the OLD cached TOC entries.
+
+    Candidate ENTRY paragraphs are those carrying at least one non-empty ``w:t``
+    (the template-shape begin paragraph has none; a Word-native begin+entry
+    paragraph qualifies; a bare end-fldChar paragraph never does). Per candidate
+    the level is the trailing digit of its TOC style id (an ECMA structural
+    convention, gated by ``_style_is_toc`` so e.g. ``Heading1`` never parses) or,
+    failing that, the ascending rank of its ``w:ind/@w:left`` indent among the
+    style-less candidates. The FIRST candidate seen for a level (with a real
+    ``pPr``) wins - deterministic in document order. ``pPr`` values are live
+    element references; callers deepcopy at write time. Returns
+    ``(level_pprs, first_candidate_ppr)`` - both possibly empty/None (zero
+    candidates is NOT malformed: a freshly authored placeholder field has none).
+    """
+    entries = [
+        p
+        for p in candidate_paras
+        if any((t.text or "").strip() for t in p.iter(w("t")))
+    ]
+    if not entries:
+        return {}, None
+    unstyled_indents = sorted(
+        {
+            _entry_indent_left(p)
+            for p in entries
+            if _toc_style_level(_p_style_val(p)) is None
+        }
+    )
+    level_pprs: dict[int, object] = {}
+    for p in entries:
+        level = _toc_style_level(_p_style_val(p))
+        if level is None:
+            level = 1 + unstyled_indents.index(_entry_indent_left(p))
+        ppr = p.find(w("pPr"))
+        if ppr is not None and level not in level_pprs:
+            level_pprs[level] = ppr
+    return level_pprs, entries[0].find(w("pPr"))
+
+
+def _toc_style_level(style_val: Optional[str]) -> Optional[int]:
+    """Level from a TOC entry style id's trailing digit (``TOC1``..``TOC9``,
+    ``Sommario2``, ...), or None. The ``_style_is_toc`` gate keeps non-TOC styles
+    (``Heading1``) from parsing; digits outside 1..9 are rejected."""
+    if not _style_is_toc(style_val):
+        return None
+    m = re.search(r"(\d+)$", style_val or "")
+    if m is None:
+        return None
+    level = int(m.group(1))
+    return level if 1 <= level <= 9 else None
+
+
+def _entry_indent_left(p) -> int:
+    """``w:pPr/w:ind/@w:left`` as int twips; absent or unparseable -> 0."""
+    pPr = p.find(w("pPr"))
+    if pPr is None:
+        return 0
+    ind = pPr.find(w("ind"))
+    if ind is None:
+        return 0
+    try:
+        return int(ind.get(w("left")) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _entry_ppr_for_level(level: int, level_pprs: dict, first_ppr, begin_ppr):
+    """Resolve the harvested ``pPr`` for an entry level, per the fallback chain:
+    exact level -> nearest harvested LOWER level -> the first old entry's pPr ->
+    the old field-begin paragraph's pPr (may be None: entry gets no pPr)."""
+    if level in level_pprs:
+        return level_pprs[level]
+    lower = [k for k in level_pprs if k < level]
+    if lower:
+        return level_pprs[max(lower)]
+    if first_ppr is not None:
+        return first_ppr
+    return begin_ppr
+
+
+_TOC_BOOKMARK_PREFIX = "_TocBD"
+
+
+def _author_heading_bookmarks(doc, headings3) -> list[str]:
+    """Author ``w:bookmarkStart``/``w:bookmarkEnd`` around each generated heading
+    paragraph; return the bookmark names in heading order.
+
+    Names are ``_TocBD000001``-style with a sequential counter skipping any name
+    already in the document; numeric ids continue past the document's current
+    maximum. Both derive solely from the input document state and heading order -
+    never random/time-based - so regenerating the same input reproduces them
+    exactly. The collision scan covers the MAIN document part only
+    (``doc.element``); bookmarks in header/footer parts are separate stories this
+    engine never writes into. ``bookmarkStart`` goes immediately after ``w:pPr``
+    (or first when the paragraph has no pPr); ``bookmarkEnd`` is the paragraph's
+    last child.
+    """
+    existing_names: set[str] = set()
+    max_id = -1
+    for bs in doc.element.iter(w("bookmarkStart")):
+        name = bs.get(w("name"))
+        if name:
+            existing_names.add(name)
+        try:
+            max_id = max(max_id, int(bs.get(w("id"))))
+        except (TypeError, ValueError):
+            continue
+    names: list[str] = []
+    counter = 1
+    next_id = max_id + 1
+    for _, _, para in headings3:
+        name = f"{_TOC_BOOKMARK_PREFIX}{counter:06d}"
+        while name in existing_names:
+            counter += 1
+            name = f"{_TOC_BOOKMARK_PREFIX}{counter:06d}"
+        existing_names.add(name)
+        counter += 1
+        start = OxmlElement("w:bookmarkStart")
+        start.set(w("id"), str(next_id))
+        start.set(w("name"), name)
+        end = OxmlElement("w:bookmarkEnd")
+        end.set(w("id"), str(next_id))
+        next_id += 1
+        pPr = para.find(w("pPr"))
+        if pPr is not None:
+            pPr.addnext(start)
+        else:
+            para.insert(0, start)
+        para.append(end)
+        names.append(name)
+    return names
+
+
+def _apply_rich_sdt_outline_plan(plan: dict, headings3, names: list[str]) -> None:
+    """Rewrite an SDT-wrapped outline TOC cache in the Word-faithful shape.
+
+    Same skeleton as the plain SDT writer (remove the old field-and-cache
+    paragraphs, append field-start + entries + field-end), but each entry carries
+    its per-level harvested ``pPr``, a bookmark hyperlink and a nested PAGEREF.
+    """
+    content = plan["content"]
+    old_field_para = plan["old_field_para"]
+    for p in plan["stale_paras"]:
+        if p.getparent() is content:
+            content.remove(p)
+    content.append(_toc_field_start_paragraph(plan["instr"], old_field_para))
+    begin_ppr = old_field_para.find(w("pPr"))
+    for (level, text, _), name in zip(headings3, names):
+        ppr = _entry_ppr_for_level(
+            level, plan["level_pprs"], plan["first_ppr"], begin_ppr
+        )
+        content.append(_outline_toc_entry_paragraph(text, ppr, name))
+    content.append(_toc_field_end_paragraph(old_field_para))
+
+
+def _apply_rich_paragraph_outline_plan(
+    plan: dict, body, headings3, names: list[str]
+) -> None:
+    """Splice a bare-paragraph outline TOC's FULL top-level span with the
+    Word-faithful multi-paragraph shape (field-start, entries, field-end).
+
+    The proven caption-index splice pattern: insert the new paragraphs before the
+    old begin paragraph, then remove every old span child - skipping the final
+    ``w:sectPr``, any paragraph HOLDING an intermediate ``w:pPr/w:sectPr``
+    (section geometry must never be deleted), and anything already detached. A
+    true single-paragraph field has span length 1 and converges to the same shape.
+    """
+    begin_el = plan["el"]
+    begin_ppr = begin_el.find(w("pPr"))
+    new_paras = [_toc_field_start_paragraph(plan["instr"], begin_el)]
+    for (level, text, _), name in zip(headings3, names):
+        ppr = _entry_ppr_for_level(
+            level, plan["level_pprs"], plan["first_ppr"], begin_ppr
+        )
+        new_paras.append(_outline_toc_entry_paragraph(text, ppr, name))
+    new_paras.append(_toc_field_end_paragraph(begin_el))
+    for np in new_paras:
+        begin_el.addprevious(np)
+    for old in plan["span_els"]:
+        if not _is_sectpr(old) and not _holds_sectpr(old) and old.getparent() is body:
+            body.remove(old)
 
 
 def refresh_visible_caption_index_cache(doc, entries_by_seq: dict) -> int:
@@ -1500,6 +1875,34 @@ def _toc_entry_paragraph(level: int, text: str, template_p):
     return p
 
 
+def _outline_toc_entry_paragraph(text: str, ppr_source, bookmark_name: str):
+    r"""Build one Word-faithful rich TOC cache entry paragraph.
+
+    Child order is normative: deep-copied ``pPr`` (omitted entirely when
+    ``ppr_source`` is None), a ``w:hyperlink w:anchor=<bookmark>`` wrapping ONLY
+    the entry text run (no ``rStyle`` - no style literals), a ``w:tab`` run, then
+    a nested complex PAGEREF field authored dirty with NO cached result between
+    ``separate`` and ``end`` (Word computes the page number on update). The
+    PAGEREF instruction keeps its surrounding spaces via ``xml:space=preserve``,
+    matching the template's own nested PAGEREFs. An internal anchor needs no
+    relationship entry.
+    """
+    p = OxmlElement("w:p")
+    if ppr_source is not None:
+        p.append(copy.deepcopy(ppr_source))
+    link = OxmlElement("w:hyperlink")
+    link.set(w("anchor"), bookmark_name)
+    link.set(w("history"), "1")
+    link.append(_text_run(text))
+    p.append(link)
+    p.append(_tab_run())
+    p.append(_field_run("begin", dirty=True))
+    p.append(_instr_run(f" PAGEREF {bookmark_name} \\h ", preserve=True))
+    p.append(_field_run("separate"))
+    p.append(_field_run("end"))
+    return p
+
+
 def _toc_entry_text(level: int, text: str) -> str:
     return f"{'  ' * max(0, level - 1)}{text}"
 
@@ -1528,9 +1931,20 @@ def _field_run(kind: str, *, dirty: bool = False):
     return r
 
 
-def _instr_run(instr: str):
+def _tab_run():
+    r = OxmlElement("w:r")
+    r.append(OxmlElement("w:tab"))
+    return r
+
+
+def _instr_run(instr: str, *, preserve: bool = False):
+    # ``preserve=False`` keeps every existing call site (authored TOC, caption
+    # index, plain fallbacks) byte-identical; only the rich PAGEREF construction
+    # passes ``preserve=True`` to keep its surrounding spaces through Word.
     r = OxmlElement("w:r")
     it = OxmlElement("w:instrText")
+    if preserve:
+        it.set(qn("xml:space"), "preserve")
     it.text = instr
     r.append(it)
     return r

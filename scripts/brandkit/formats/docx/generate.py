@@ -109,12 +109,21 @@ def generate(
     # index (table-of-tables / -figures) can regenerate from the new content.
     resolver = ProfileResolver(profile)
     caption_ctx = _build_caption_indexer(profile)
+    # Collect each generated heading's live paragraph element alongside its
+    # (level, text): the TOC cache rewrite anchors bookmark targets on those
+    # paragraphs. Selection mirrors the previous _outline_headings exactly (same
+    # expanded blocks, same level/text/strip/non-empty filter).
+    heading_paras: list[tuple[int, str, object]] = []
     for block in idoc.blocks:
-        _write_block(doc, resolver, block, sink, caption_ctx)
+        written = _write_block(doc, resolver, block, sink, caption_ctx)
+        if isinstance(block, ir.Heading) and written is not None:
+            text = textutil.runs_to_text(block.runs).strip()
+            if text:
+                heading_paras.append((block.level, text, written._p))
 
     # Keep the visible TOC field cache aligned for renderers that do not update
     # fields in headless export. The field itself remains dirty/updateable.
-    structure.refresh_visible_outline_toc_cache(doc, _outline_headings(idoc.blocks))
+    structure.refresh_visible_outline_toc_cache(doc, heading_paras)
 
     # Rebuild every KEPT caption index's visible cache from the captions just emitted
     # (the SEQ classes the indexer collected), so a headless render shows the new
@@ -149,16 +158,6 @@ def generate(
     # need normalizing for byte-idempotent re-runs (no modified<-created pin).
     repack_fixed_timestamps(out)
     return out
-
-
-def _outline_headings(blocks: list) -> list[tuple[int, str]]:
-    headings: list[tuple[int, str]] = []
-    for block in blocks:
-        if isinstance(block, ir.Heading):
-            text = textutil.runs_to_text(block.runs).strip()
-            if text:
-                headings.append((block.level, text))
-    return headings
 
 
 def _content_has_captionables(idoc: ir.IntermediateDocument) -> bool:
@@ -639,17 +638,20 @@ def _write_block(
     block: ir.Block,
     findings: list[Finding],
     caption_ctx: Optional["_CaptionIndexer"] = None,
-) -> None:
+) -> object | None:
     # Compute the resolved op first so the captured brand font reaches even the raw-
     # XML hyperlink runs (threaded via _op_latin into _add_runs); plain runs are also
     # branded by the post-write _apply_appearance pass, whose set-only-when-unset
     # guard makes the double-touch a no-op (re-runs stay byte-identical).
+    # Returns the written Heading paragraph (other blocks return None): the TOC
+    # cache rewrite needs each heading's live paragraph to anchor its bookmark.
     if isinstance(block, ir.Heading):
         op = resolver.resolve_block(block)
         para = _para_with_runs(
             doc, block.runs, _op_latin(op), resolver=resolver, findings=findings
         )
         _apply_resolved_style(doc, para, op, findings)
+        return para
     elif isinstance(block, ir.Paragraph):
         op = resolver.resolve_block(block)
         para = _para_with_runs(

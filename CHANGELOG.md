@@ -4,6 +4,26 @@ All notable changes to BrandDocs are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The refreshed outline TOC cache is now a real Word-shaped TOC (REFLECTIONS
+  P3).** The visible cache of a preserved or authored outline table of contents
+  was rewritten as flat plain-text entries: one style for every level, no
+  links, no page-number fields. The rewrite now authors deterministic
+  bookmarks on the generated headings (`_TocBD000001` sequential,
+  collision-scanned ids), harvests a per-level paragraph-style map from the
+  template's OWN cached entries (trailing-digit TOC style convention,
+  indentation-rank fallback, nearest-lower-level chain), and emits each entry
+  as hyperlink-to-bookmark + tab + nested dirty `PAGEREF`, so previews show
+  the template's real per-level TOC styling and Word fills page numbers on
+  open. The bare-paragraph TOC path converges to the same multi-paragraph
+  shape. Fail-closed: a malformed cache falls back to the previous simple
+  rewrite atomically; documents without an outline TOC author zero bookmarks
+  and stay byte-identical (now pinned by a dedicated TOC-free frozen anchor;
+  the historical anchor was deliberately recomputed because the committed
+  fixture itself contains an outline TOC, so its cached-TOC bytes necessarily
+  changed shape).
+
 ### Added
 
 - **Contributor onramp (REFLECTIONS P1).** `CONTRIBUTING.md` expanded from a

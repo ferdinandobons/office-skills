@@ -28,19 +28,32 @@ what the docx writer emits - which is exactly what PR-0 must never do.
 If a LATER, intentional change to the docx writer alters these bytes, recompute the
 constant deliberately (the test prints the actual hash on failure) - never silence
 the assertion.
+
+NOTE: the ``acme_complex.docx`` shell itself CONTAINS a bare-paragraph outline TOC
+field, so ``_FROZEN_SHA256`` moves whenever the outline-TOC cache writer changes
+shape (see the recompute log at the constant). The byte-identity guarantee for
+documents WITHOUT an outline TOC is pinned separately - and independently of TOC
+writer changes - by ``NoOutlineTocAnchorTest`` below, against the same fixture with
+the outline TOC field span stripped.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
+from docx import Document
+from lxml import etree
+
 from brandkit.formats.docx import generate as docx_generate
+from brandkit.formats.docx import structure as docx_structure
 from brandkit.ir import model as ir
 from brandkit.profile import schema
 
@@ -53,7 +66,19 @@ _SHELL = (
 
 # The frozen output hash. Computed from the CURRENT docx writer; the refactor must
 # keep it identical. (Recompute deliberately only on an intentional writer change.)
-_FROZEN_SHA256 = "c96548539684d65df6e91f5ee52009df191ad09670b1e1498672e2add16fa878"
+#
+# DELIBERATE RECOMPUTE (2026-06-10), per the protocol in the module docstring: the
+# Word-faithful outline-TOC cache rewrite intentionally changed these bytes. This
+# shell contains a bare-paragraph outline TOC field (TOC \o "1-3" \h \z \u), so the
+# triple's output now carries authored heading bookmarks and hyperlink + nested
+# dirty-PAGEREF cache entries, and the FULL old field span is replaced (which also
+# removes the stale template entries the previous single-paragraph rewrite leaked
+# after the field). No implementation of that feature can keep a TOC-bearing
+# shell's bytes frozen. Previous value (plain-text cache shape):
+#   c96548539684d65df6e91f5ee52009df191ad09670b1e1498672e2add16fa878
+# The no-outline-TOC byte-identity guarantee that this anchor used to stand in for
+# is now pinned genuinely by NoOutlineTocAnchorTest / _FROZEN_NO_TOC_SHA256 below.
+_FROZEN_SHA256 = "d6f261d75bcbe3319298d24e249f414856361078c4f860fd0ea19065aceb75b9"
 
 
 def _anchor_profile() -> dict:
@@ -144,6 +169,116 @@ class AppearanceRefactorAnchorTest(unittest.TestCase):
     def test_docx_generate_is_byte_idempotent(self):
         """Two generations of the fixed triple hash identically (determinism guard)."""
         self.assertEqual(_generate_hash(), _generate_hash())
+
+
+# ---------------------------------------------------------------------------
+# The TOC-free anchor: documents WITHOUT an outline TOC stay byte-identical.
+# ---------------------------------------------------------------------------
+# The frozen output hash for the SAME (profile, idoc) pair over a TOC-free shell:
+# the committed acme_complex.docx fixture with its outline TOC field span stripped
+# (derived deterministically at test time - no second committed binary, and the
+# provenance stays auditable). This anchor pins the hard guarantee that writer
+# changes scoped to outline-TOC handling (cache shape, bookmark authoring) leave
+# documents WITHOUT an outline TOC byte-for-byte unchanged: bookmarks and rich
+# cache entries are authored ONLY when an outline TOC field is present. Unlike
+# _FROZEN_SHA256 above, an outline-TOC writer change must NEVER move this value.
+# Verified identical between pre-change HEAD and the rich-TOC writer (2026-06-10):
+# both produce exactly these bytes for the TOC-free triple.
+_FROZEN_NO_TOC_SHA256 = (
+    "64d8f0963e0a67cdb012db922d9467aadc1c625ffd10f27b49d9d4c5d5504da6"
+)
+
+_WML_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _strip_outline_toc(src: Path, dst: Path) -> None:
+    """Write ``dst`` = ``src`` minus the outline TOC field's full body span.
+
+    Independent of the engine under test: scans ``word/document.xml`` for the
+    top-level child whose field code is an outline TOC instruction (starts with
+    ``TOC``, no ``\\c`` caption switch), tracks ``fldChar`` begin/end depth to the
+    span's last child, removes the span, and repacks every part with fixed zip
+    metadata so the derived shell is itself byte-stable across runs. The two
+    caption indexes (``TOC \\c``) in the fixture are deliberately kept.
+    """
+    with zipfile.ZipFile(src) as zin:
+        parts = [(info.filename, zin.read(info.filename)) for info in zin.infolist()]
+    parts_map = dict(parts)
+    root = etree.fromstring(parts_map["word/document.xml"])
+    body = root.find(f"{_WML_NS}body")
+    children = list(body)
+
+    def _is_outline_field_code(el) -> bool:
+        return any(
+            (it.text or "").lstrip().startswith("TOC") and "\\c" not in (it.text or "")
+            for it in el.iter(f"{_WML_NS}instrText")
+        )
+
+    begin_i = next(i for i, ch in enumerate(children) if _is_outline_field_code(ch))
+    depth = 0
+    end_i = begin_i
+    for i in range(begin_i, len(children)):
+        for fc in children[i].iter(f"{_WML_NS}fldChar"):
+            kind = fc.get(f"{_WML_NS}fldCharType")
+            if kind == "begin":
+                depth += 1
+            elif kind == "end":
+                depth -= 1
+        if depth <= 0:
+            end_i = i
+            break
+    for ch in children[begin_i : end_i + 1]:
+        body.remove(ch)
+    parts_map["word/document.xml"] = etree.tostring(
+        root, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, _ in parts:
+            zi = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(zi, parts_map[name])
+
+
+def _generate_no_toc_output() -> bytes:
+    with tempfile.TemporaryDirectory() as td:
+        shell = Path(td) / "no_toc_shell.docx"
+        _strip_outline_toc(_SHELL, shell)
+        # The derived shell must really be TOC-free, or this anchor pins nothing.
+        assert not docx_structure.is_outline_toc_present(Document(str(shell)))
+        out = Path(td) / "out.docx"
+        docx_generate.generate(_anchor_profile(), shell, _anchor_idoc(), out)
+        return out.read_bytes()
+
+
+@unittest.skipUnless(_SHELL.exists(), "complex docx fixture missing")
+class NoOutlineTocAnchorTest(unittest.TestCase):
+    def test_no_toc_generate_output_matches_frozen_hash(self):
+        """Without an outline TOC the writer's output is byte-for-byte unchanged.
+
+        This is the operative byte-identity guarantee: outline-TOC writer changes
+        (cache shape, bookmark authoring) must never reach a TOC-free document.
+        """
+        data = _generate_no_toc_output()
+        actual = hashlib.sha256(data).hexdigest()
+        self.assertEqual(
+            actual,
+            _FROZEN_NO_TOC_SHA256,
+            "docx generate() output for a TOC-FREE shell changed: outline-TOC "
+            "writer work must leave documents without an outline TOC "
+            "byte-identical. If an UNRELATED intentional writer change moved "
+            f"these bytes, update _FROZEN_NO_TOC_SHA256 to {actual!r} "
+            "deliberately.",
+        )
+
+    def test_no_toc_output_authors_zero_bookmarks(self):
+        """Bookmarks are authored ONLY when an outline TOC field is present."""
+        data = _generate_no_toc_output()
+        xml = zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml")
+        self.assertNotIn(b"bookmarkStart", xml)
+
+    def test_no_toc_generate_is_byte_idempotent(self):
+        """Shell derivation + generation is deterministic across runs."""
+        self.assertEqual(_generate_no_toc_output(), _generate_no_toc_output())
 
 
 if __name__ == "__main__":
