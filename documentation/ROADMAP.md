@@ -197,6 +197,12 @@ and confidence; they stay advisory until a threshold or an explicit accept
 
 ## 3. Interactive profile refinement from user feedback (human-in-the-loop)
 
+> **Status: SHIPPED (the `refine` verb).** End-of-generation user feedback (text
+> or a screenshot) becomes a validated comprehension delta through the same
+> fail-closed, shell-frozen sink, improving FUTURE generations only. The
+> ask-at-the-end agent guidance lives in each `SKILL.md`; the design below is the
+> full record.
+
 ### Problem
 The Brand Profile only ever learns from what the engine can *measure*. After a
 generation, the engine cannot tell whether a heading that **should** be the brand

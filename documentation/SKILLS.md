@@ -50,7 +50,7 @@ the engine and are catching up.
 | `brand-xlsx`: named-region fills, formula-preserving, native charts | ✅ working (fidelity still catching up to docx) |
 | Visual QA (LibreOffice render + manifest-driven repair loop) | 🚧 implemented with graceful degraded mode |
 | Native charts (DOCX / PPTX / XLSX), SmartArt diagrams (DOCX / PPTX), merged tables | ✅ working |
-| Native Word `toc` (authored field, or deferral to a preserved outline TOC) | ✅ working |
+| Native Word `toc` (authored field, or deferral to a preserved outline TOC) with a Word-faithful refreshed cache (authored bookmarks, per-level styles, `PAGEREF`; template demo entries never survive) | ✅ working |
 | Excel semantic number formats (`number.<family>` resolved to the template's mask) | ✅ working |
 | Model-driven reusable-fragment population (`comprehend` → `components` / `sections`, with `{{slot}}` substitution) | ✅ working |
 | Brand appearance capture: typography (all 3 formats) + paragraph geometry / table conditional formats / list numbering (docx), dominant-sampled and shell-verified | ✅ working |
@@ -61,6 +61,10 @@ the engine and are catching up.
 | Optional OCR rendered-text residual scan | ✅ working when Tesseract is installed |
 | Template-based skill eval set (DOCX/PPTX/XLSX) | ✅ working in CI |
 | Strict visual mode (`--qa strict`) | ✅ working |
+| Multi-template profile blending (`extract --blend`, same-format, value-facts only, pointers never cross shells) | ✅ working |
+| Cross-template brand-drift report (`compare-profiles`, read-only, exit 1 on drift) | ✅ working |
+| Role-first authoring surface (PROFILE.md role / palette-role / hints sections + per-skill authoring guidance) | ✅ working |
+| Local-corpus fidelity benchmark (`scripts/corpus_benchmark.py`, real templates outside the repo) | ✅ working |
 | Richer image analysis | 🔭 planned |
 
 Visual Word overflow needs LibreOffice, since Word lays out at render time.
