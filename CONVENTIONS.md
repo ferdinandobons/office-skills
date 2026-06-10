@@ -63,6 +63,15 @@ Set `BRAND_DOCS_ROOT` to the plugin root to invoke the CLI from any working
 directory (the skill `cli.py` shims honor it; if unset they walk up to the nearest
 `.claude-plugin/`). `${CLAUDE_PLUGIN_ROOT}` never appears in author-facing SKILL.md.
 
+Beyond the five skill verbs, the engine CLI exposes: `comprehend-input`
+(read-only model bundle, above), `refine` (model-authored qualitative delta
+overlaid on the present comprehension, ADVISORY until `--accept`; §14 documents
+its `learn`/`propose-overrides` siblings), `compare-profiles` (read-only brand
+drift report between two saved profiles; exit 1 on drift), the `extract
+--blend` flag (multi-template value-fact blending, §16), `list`, and `doctor`.
+The full verb table lives in `documentation/PLUGIN_WORKFLOW.md` (drift-guarded
+by `tests/test_doc_drift.py`).
+
 ---
 
 ## 2. The Brand Profile directory
@@ -656,3 +665,40 @@ itself).
   engine is re-implemented from scratch (CI guard `tests/test_no_proprietary.py`).
 
 Every file in the engine carries an `SPDX-License-Identifier` header.
+
+---
+
+## 16. Multi-template blending (`extract --blend`) and `compare-profiles`
+
+`extract --name <brand> --template <second> --blend` folds a SECOND template of
+the **same format** into an existing profile (owner: `profile/blend.py`). The
+frozen vocabulary:
+
+- **Value-facts only.** The blend surface is `roles.<id>.appearance`
+  (`font`/`size_hp`/`color`), `theme.fonts.body`, and `hex:`-keyed
+  `theme.palette` entries. Artifact POINTERS (style ids/names, layouts,
+  anchors, numbering) **never cross shells**: generation still opens the
+  PRIMARY shell and the resolver membership-validates against it alone.
+- **Precedence.** The primary wins every conflict; a secondary only FILLS
+  facts the primary left unset and CORROBORATES agreements (bounded,
+  deterministic confidence boost; role-detection confidence corroborates only
+  on exact resolver equality).
+- **Provenance.** Donor binaries are stored content-addressed at
+  `template/blend-<sha12>.<ext>` and recorded in
+  `provenance.blended_shells` (filename + path + sha256, sorted unique); the
+  per-fact ledger lives under `blend.ledger` (`filled` / `corroborated`,
+  schema `blend-1`). The QA check `blend_shell_provenance` re-hashes every
+  donor (tamper/missing/escape = ERROR).
+- **Transaction.** Fail-closed all-or-nothing: a rejected blend leaves
+  `profile.json` byte-identical. Sha-deduped and idempotent: re-blending the
+  same file (or the primary itself) is a no-op. Single-template profiles
+  serialize without ONE new key, and the frozen generation anchors do not
+  move.
+
+`compare-profiles --name-a A --name-b B` is the read-only cross-template drift
+report (owner: `profile/compare.py`): theme colors per slot, theme/captured
+fonts, semantic palette roles, off-theme usage (a raw hex in one profile that
+is a theme slot in the other). Structural facts are per-shell by design and
+are never drift; role coverage is informational. Writes nothing; exit 1 on
+brand-level drift (CI-gateable). Cross-format pairs are its intended use; the
+blend stays same-format only.

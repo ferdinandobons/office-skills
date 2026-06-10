@@ -6,6 +6,28 @@ All notable changes to BrandDocs are documented in this file.
 
 ### Fixed
 
+- **General-review wave (multi-agent, 31 confirmed findings).** Engine: the
+  heading-less generation now collapses a bare multi-paragraph outline TOC's
+  FULL span to an empty field (the plain writer used to leave the template's
+  demo entries and orphan the end fldChar - a regression of the rich-TOC
+  delta); pptx and xlsx extraction now parse the theme `a:fontScheme` latin
+  typefaces instead of hardcoding `latin=null` (the docx extractor already
+  did); `schema.validate` returns problems instead of raising on a
+  hand-edited blend ledger with mixed-type entries; profile JSON/sidecar
+  writes are atomic (same-directory temp + `os.replace`), making the blend's
+  byte-identity-on-failure claim true under ENOSPC/kill; OOXML `unpack`/
+  `read_part` reject decompression bombs (per-part and per-package declared
+  inflated-size floors); the corpus runner exits 1 on verify exceptions, not
+  just clean failures. Examples: the three builders now consume ONE complete
+  12-slot brand clrScheme from `_brandlib` (docx/pptx/xlsx had drifted apart
+  on five supporting slots - caught live by `compare-profiles` - and the
+  shipped pair now reports zero theme drift, pinned by a strengthened CLI
+  test that replaced a tautological assertion). Docs: README test count and
+  blending/compare teaching, CONVENTIONS gains the engine verb surface and a
+  §16 blend/compare vocabulary, the Pages site's broken README anchor and
+  stale install command fixed, a real brand word in ROADMAP replaced with a
+  placeholder.
+
 - **The refreshed outline TOC cache is now a real Word-shaped TOC (REFLECTIONS
   P3).** The visible cache of a preserved or authored outline table of contents
   was rewritten as flat plain-text entries: one style for every level, no

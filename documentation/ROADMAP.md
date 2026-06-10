@@ -94,7 +94,7 @@ the home for captured typography. Three additive layers:
 
 ### Scope / non-goals (first cut)
 - Role-level **dominant** typography (font + dominant color + size). Per-word
-  accents (e.g. only the word "Collabfor.it" in blue) are an `IntermediateDocument`
+  accents (e.g. only the word "<brand_name>" in blue) are an `IntermediateDocument`
   authoring concern, out of scope.
 - Cover-layout reconstruction (the separate `cover.kind = NONE` detection gap) is
   tracked independently; typography capture alone already makes a `heading.1` title

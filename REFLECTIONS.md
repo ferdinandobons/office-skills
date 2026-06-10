@@ -193,6 +193,17 @@ exploration close the current roadmap:
   IntermediateDocument authoring intelligence (fragment suggestion, role-choice
   guidance); a heterogeneous real-template corpus for fidelity benchmarking
   (local-only, never committed) with Word-vs-LibreOffice notes for users.
+  - **DONE (2026-06-10), the whole wave plus extras.** Shipped: the rich
+    outline-TOC cache refresh and the stale-derived-index empty-rebuild (the
+    validation finding that opened P3), `compare-profiles` (which immediately
+    caught real theme drift between the shipped example templates),
+    same-format multi-template blending (`extract --blend`, value-facts only,
+    pointers never cross shells), the authoring surface (shared PROFILE.md
+    sections + per-skill authoring guidance), and the local-corpus fidelity
+    runner (validated on the real local corpus). Closed by a 5-dimension
+    multi-agent general review (31 confirmed findings fixed: a TOC rebuild
+    regression, pptx/xlsx fontScheme capture, one-brand example alignment,
+    atomic profile writes, decompression-bomb guards, doc drift).
 
 Items in section 4/5 that touch the engine go through the same rules as
 everything else: fail-closed, byte-identical when absent, universal across the

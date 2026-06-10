@@ -50,6 +50,8 @@
 
 All three share one engine and expose the same verbs: **`extract` → `comprehend` *(optional, model-driven)* → `verify` → `generate`**, plus the learning verbs **`learn` / `propose-overrides` / `refine`** that fold QA findings and user feedback back into the profile. Details → [documentation/SKILLS.md](documentation/SKILLS.md).
 
+**Several templates, one brand?** `extract --blend` folds a second same-format template into a saved profile at the value-fact level: it fills gaps and corroborates agreements, the primary template wins every conflict, and the brand guarantee is untouched because artifact pointers never cross templates. `compare-profiles` reports brand drift (theme colors, fonts, off-theme usage) between any two saved profiles and exits non-zero on drift, so it can gate brand coherence in CI.
+
 **Two-phase by design:** the deterministic engine works with **no model at all** (extract / verify / generate, fully offline); the model-assisted verbs sit ON TOP and can only NAME captured facts - every proposal is validated fail-closed, so the brand guarantee never depends on a model being right.
 
 ---
@@ -133,7 +135,7 @@ The input (`idoc.json`) is an **IntermediateDocument** of brand-agnostic typed b
 
 ## Project status
 
-**Alpha, maturing.** Stability is per format: **Word (`brand-docx`) is robust** - the reference implementation, verified end-to-end on real templates with an 850-test suite, three QA lanes and a frozen byte-identity anchor; **PowerPoint and Excel share the engine** and are catching up to docx parity. The profile schema (1.2.0) is frozen and additive: profiles keep working across releases. Full status table → [documentation/SKILLS.md](documentation/SKILLS.md#project-status).
+**Alpha, maturing.** Stability is per format: **Word (`brand-docx`) is robust** - the reference implementation, verified end-to-end on real templates with a 900+ test suite, three QA lanes and frozen byte-identity anchors; **PowerPoint and Excel share the engine** and are catching up to docx parity. The profile schema (1.2.0) is frozen and additive: profiles keep working across releases. Full status table → [documentation/SKILLS.md](documentation/SKILLS.md#project-status).
 
 ## Website & discovery
 
