@@ -162,6 +162,19 @@ exploration close the current roadmap:
 - **P0, before the v0.8.0 tag:** real-template end-to-end validation
   (re-extract, comprehend, generate, strict visual QA); README/docs sync for
   every new verb and behavior in the release; release checklist written down.
+  - **Validation DONE (2026-06-10), verdict PASS.** Full skill path (extract,
+    comprehend, generate, deep visual QA) on the three example templates plus
+    two real local-only templates. Results: faithful in-place cover + demo
+    clearing on the SDT-anchored real template; on the kind==NONE real template
+    the E4 cover synthesis, the E2 faked-heading promotion (the captured 80hp
+    applied to heading.1) and the Roboto body capture all fired exactly as
+    designed; E1 alias minted live (byte-copied ref); caption indexes
+    regenerate from new captions (stale demo entries dropped); the B2 learning
+    loop recorded recurrences across same-shell runs; xlsx fail-closed rejected
+    an unknown named range. Known limits confirmed: the cached OUTLINE TOC is
+    not refreshed from new content (Word self-heals on update-fields; preview
+    renderers show broken PAGEREFs) - promoted to the hardening list; ambiguous
+    blank-page/component-survival WARNINGs remain the C2 triage's job.
 - **P1, solidity:** CONTRIBUTING expansion + issue/PR templates + good first
   issues; quick start wired to the shipped example templates; engine module
   README; PLUGIN_WORKFLOW diagram refresh with a drift guard; maturity-status

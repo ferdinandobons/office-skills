@@ -47,7 +47,9 @@
 | **`brand-pptx`** | PowerPoint `.pptx` | decks from the template's real masters & layouts, with native charts, diagrams & merged tables |
 | **`brand-xlsx`** | Excel `.xlsx` | workbooks: named-region fills with **formulas preserved** and brand number formats |
 
-All three share one engine and expose the same verbs: **`extract` → `verify` → `generate`**. Details → [documentation/SKILLS.md](documentation/SKILLS.md).
+All three share one engine and expose the same verbs: **`extract` → `comprehend` *(optional, model-driven)* → `verify` → `generate`**, plus the learning verbs **`learn` / `propose-overrides` / `refine`** that fold QA findings and user feedback back into the profile. Details → [documentation/SKILLS.md](documentation/SKILLS.md).
+
+**Two-phase by design:** the deterministic engine works with **no model at all** (extract / verify / generate, fully offline); the model-assisted verbs sit ON TOP and can only NAME captured facts - every proposal is validated fail-closed, so the brand guarantee never depends on a model being right.
 
 ---
 
@@ -107,11 +109,13 @@ Restart or reload the agent if the skills don't appear immediately.
 
 The agent activates `brand-docx`, extracts (or reuses) a Brand Profile, fills the template shell in its structural order, runs QA, and returns the file. PowerPoint (`brand-pptx`) and Excel (`brand-xlsx`) work the same way.
 
-**Direct CLI** (the engine, for tests & debugging):
+**Direct CLI** (the engine, for tests & debugging). No template at hand? Try the
+shipped synthetic example: `examples/templates/branddocs_template.docx` (also
+`.pptx` / `.xlsx`).
 
 ```bash
 # 1) Extract the brand from a template into a reusable Brand Profile
-python scripts/brandkit/cli.py extract --name <your_company> --template template.docx --scope project
+python scripts/brandkit/cli.py extract --name <your_company> --template examples/templates/branddocs_template.docx --scope project
 
 # 2) Verify the profile (fails if a role points at a missing artifact)
 python scripts/brandkit/cli.py verify --name <your_company> --scope auto --qa auto
@@ -126,7 +130,7 @@ The input (`idoc.json`) is an **IntermediateDocument** of brand-agnostic typed b
 
 ## Project status
 
-**Alpha.** The Word vertical (`brand-docx`) is the reference implementation, verified end-to-end on real templates; PowerPoint and Excel share the engine and are catching up. Full status table → [documentation/SKILLS.md](documentation/SKILLS.md#project-status).
+**Alpha, maturing.** Stability is per format: **Word (`brand-docx`) is robust** - the reference implementation, verified end-to-end on real templates with an 850-test suite, three QA lanes and a frozen byte-identity anchor; **PowerPoint and Excel share the engine** and are catching up to docx parity. The profile schema (1.2.0) is frozen and additive: profiles keep working across releases. Full status table → [documentation/SKILLS.md](documentation/SKILLS.md#project-status).
 
 ## Website & discovery
 
@@ -137,7 +141,8 @@ The input (`idoc.json`) is an **IntermediateDocument** of brand-agnostic typed b
 
 Latest release: [v0.7.0](https://github.com/ferdinandobons/brand-docs/releases/tag/v0.7.0). See [CHANGELOG.md](CHANGELOG.md).
 
-## License & acknowledgements
+## License, citation & acknowledgements
 
 - This project's own code is **[MIT](LICENSE)** © 2026 Ferdinando Bonsegna.
 - Self-contained: the OOXML engine is re-implemented from scratch; it does **not** vendor any proprietary or third-party Office tooling. See [`NOTICE`](NOTICE).
+- Citing BrandDocs in academic or organizational work → [`CITATION.cff`](CITATION.cff).
